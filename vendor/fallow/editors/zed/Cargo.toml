@@ -1,0 +1,16 @@
+[package]
+name = "fallow_zed"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+
+[lib]
+path = "src/fallow.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+zed_extension_api = "0.7.0"
+
+[workspace]

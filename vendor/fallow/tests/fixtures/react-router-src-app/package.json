@@ -1,0 +1,6 @@
+{
+  "name": "react-router-src-app",
+  "dependencies": {
+    "@react-router/dev": "^7.0.0"
+  }
+}

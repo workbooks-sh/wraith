@@ -1,0 +1,435 @@
+name: Test GitHub Action
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'action/**'
+      - 'action.yml'
+      - '.github/workflows/test-action.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: test-action-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  test-jq-scripts:
+    name: Test jq scripts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run jq unit tests
+        run: bash action/tests/run.sh
+
+  test-sarif:
+    name: Test SARIF output
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 20
+
+      - name: Run action with SARIF format
+        id: fallow
+        uses: ./
+        env:
+          # These smoke jobs run the checked-out Action against the currently
+          # published npm package. During the PR window before a release, the
+          # verifier can be newer than published platform packages and fail on
+          # missing .sig files. The fail-closed verifier path is covered by
+          # action/tests/run.sh and npm/fallow/scripts/verify-binary.test.js.
+          FALLOW_SKIP_BINARY_VERIFY: "1"
+        with:
+          root: tests/fixtures/basic-project
+          format: sarif
+          fail-on-issues: false
+
+      - name: Verify SARIF output exists and is valid
+        env:
+          SARIF_PATH: ${{ steps.fallow.outputs.sarif }}
+          ISSUES: ${{ steps.fallow.outputs.issues }}
+        run: |
+          if [ ! -f "$SARIF_PATH" ]; then
+            echo "::error::SARIF output file not found"
+            exit 1
+          fi
+          echo "SARIF file: $SARIF_PATH"
+
+          # Validate JSON
+          jq empty "$SARIF_PATH"
+
+          # Verify SARIF schema structure
+          SCHEMA=$(jq -r '.["$schema"] // .version' "$SARIF_PATH")
+          if [ -z "$SCHEMA" ]; then
+            echo "::error::SARIF file missing schema or version field"
+            exit 1
+          fi
+          echo "SARIF schema/version: $SCHEMA"
+
+          # Verify issues count
+          if [ -z "$ISSUES" ] || [ "$ISSUES" -eq 0 ]; then
+            echo "::error::Expected issues > 0 for basic-project fixture, got: $ISSUES"
+            exit 1
+          fi
+          echo "Found $ISSUES issues (expected > 0)"
+
+  test-json:
+    name: Test JSON output
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 20
+
+      - name: Run action with JSON format
+        id: fallow
+        uses: ./
+        env:
+          FALLOW_SKIP_BINARY_VERIFY: "1"
+        with:
+          command: dead-code
+          root: tests/fixtures/basic-project
+          format: json
+          fail-on-issues: false
+
+      - name: Verify JSON results
+        env:
+          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
+          ISSUES: ${{ steps.fallow.outputs.issues }}
+        run: |
+          if [ ! -f "$RESULTS_PATH" ]; then
+            echo "::error::Results output file not found"
+            exit 1
+          fi
+          echo "Results file: $RESULTS_PATH"
+
+          # Validate JSON
+          jq empty "$RESULTS_PATH"
+
+          # Verify expected fields
+          jq -e '.total_issues' "$RESULTS_PATH" > /dev/null
+          jq -e '.unused_files' "$RESULTS_PATH" > /dev/null
+          jq -e '.unused_exports' "$RESULTS_PATH" > /dev/null
+          echo "JSON structure validated"
+
+          # Verify issues output matches JSON
+          JSON_ISSUES=$(jq -r '.total_issues' "$RESULTS_PATH")
+          if [ "$ISSUES" != "$JSON_ISSUES" ]; then
+            echo "::error::Output issues ($ISSUES) does not match JSON total_issues ($JSON_ISSUES)"
+            exit 1
+          fi
+          echo "Issues match: $ISSUES"
+
+  test-zero-issues:
+    name: Test clean project (zero issues)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 20
+
+      - name: Create clean project
+        run: |
+          mkdir -p /tmp/clean-project/src
+          cat > /tmp/clean-project/package.json << 'EOF'
+          {
+            "name": "clean-project",
+            "main": "src/index.js"
+          }
+          EOF
+          cat > /tmp/clean-project/src/index.js << 'EOF'
+          const greet = (name) => `Hello, ${name}!`;
+          console.log(greet('world'));
+          EOF
+
+      - name: Run action against clean project
+        id: fallow
+        uses: ./
+        env:
+          FALLOW_SKIP_BINARY_VERIFY: "1"
+        with:
+          root: /tmp/clean-project
+          format: json
+          fail-on-issues: true
+          auto-changed-since: false
+
+      - name: Verify zero issues
+        env:
+          ISSUES: ${{ steps.fallow.outputs.issues }}
+          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
+        run: |
+          if [ "$ISSUES" != "0" ]; then
+            echo "::error::Expected 0 issues for clean project, got: $ISSUES"
+            [ -f "$RESULTS_PATH" ] && cat "$RESULTS_PATH"
+            exit 1
+          fi
+          echo "Clean project reported 0 issues"
+
+  test-dupes:
+    name: Test dupes command
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 20
+
+      - name: Run action with dupes command
+        id: fallow
+        uses: ./
+        env:
+          FALLOW_SKIP_BINARY_VERIFY: "1"
+        with:
+          command: dupes
+          root: tests/fixtures/duplicate-code
+          format: json
+          fail-on-issues: false
+
+      - name: Verify dupes JSON results
+        env:
+          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
+          ISSUES: ${{ steps.fallow.outputs.issues }}
+        run: |
+          if [ ! -f "$RESULTS_PATH" ]; then
+            echo "::error::Results output file not found"
+            exit 1
+          fi
+
+          # Validate JSON
+          jq empty "$RESULTS_PATH"
+
+          # Verify dupes-specific fields
+          jq -e '.stats.clone_groups' "$RESULTS_PATH" > /dev/null
+          jq -e '.stats.total_files' "$RESULTS_PATH" > /dev/null
+          echo "Dupes JSON structure validated"
+
+          # Issues output should match clone_groups
+          JSON_GROUPS=$(jq -r '.stats.clone_groups' "$RESULTS_PATH")
+          if [ "$ISSUES" != "$JSON_GROUPS" ]; then
+            echo "::error::Output issues ($ISSUES) does not match stats.clone_groups ($JSON_GROUPS)"
+            exit 1
+          fi
+          echo "Clone groups: $ISSUES"
+
+  test-fix:
+    name: Test fix command (dry-run)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 20
+
+      - name: Run action with fix command
+        id: fallow
+        uses: ./
+        env:
+          FALLOW_SKIP_BINARY_VERIFY: "1"
+        with:
+          command: fix
+          root: tests/fixtures/basic-project
+          format: json
+          fail-on-issues: false
+          dry-run: true
+
+      - name: Verify fix JSON results
+        env:
+          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
+          ISSUES: ${{ steps.fallow.outputs.issues }}
+        run: |
+          if [ ! -f "$RESULTS_PATH" ]; then
+            echo "::error::Results output file not found"
+            exit 1
+          fi
+
+          # Validate JSON
+          jq empty "$RESULTS_PATH"
+
+          # Verify fix-specific fields
+          jq -e '.fixes' "$RESULTS_PATH" > /dev/null
+          jq -e '.dry_run' "$RESULTS_PATH" > /dev/null
+          echo "Fix JSON structure validated (dry_run=$(jq -r '.dry_run' "$RESULTS_PATH"))"
+
+          # Verify dry_run is true
+          DRY_RUN=$(jq -r '.dry_run' "$RESULTS_PATH")
+          if [ "$DRY_RUN" != "true" ]; then
+            echo "::error::Expected dry_run=true, got: $DRY_RUN"
+            exit 1
+          fi
+
+  test-dead-code-alias:
+    name: Test dead-code command alias
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 20
+
+      - name: Run action with dead-code command
+        id: fallow
+        uses: ./
+        env:
+          FALLOW_SKIP_BINARY_VERIFY: "1"
+        with:
+          command: dead-code
+          root: tests/fixtures/basic-project
+          format: json
+          fail-on-issues: false
+
+      - name: Verify dead-code alias produces valid output
+        env:
+          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
+          ISSUES: ${{ steps.fallow.outputs.issues }}
+        run: |
+          if [ ! -f "$RESULTS_PATH" ]; then
+            echo "::error::Results file not found"
+            exit 1
+          fi
+          jq empty "$RESULTS_PATH"
+          jq -e '.total_issues' "$RESULTS_PATH" > /dev/null
+          jq -e '.unused_exports' "$RESULTS_PATH" > /dev/null
+          echo "dead-code alias: JSON validated, $ISSUES issues"
+
+  test-bare-combined:
+    name: Test bare invocation (combined JSON)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 20
+
+      - name: Run action with no command (bare invocation)
+        id: fallow
+        uses: ./
+        env:
+          FALLOW_SKIP_BINARY_VERIFY: "1"
+        with:
+          root: tests/fixtures/basic-project
+          format: json
+          fail-on-issues: false
+
+      - name: Verify combined JSON structure
+        env:
+          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
+          ISSUES: ${{ steps.fallow.outputs.issues }}
+        run: |
+          if [ ! -f "$RESULTS_PATH" ]; then
+            echo "::error::Results file not found"
+            exit 1
+          fi
+          jq empty "$RESULTS_PATH"
+
+          # Combined output nests results under .check, .dupes, .health
+          jq -e '.check' "$RESULTS_PATH" > /dev/null
+          jq -e '.dupes' "$RESULTS_PATH" > /dev/null
+          jq -e '.health' "$RESULTS_PATH" > /dev/null
+
+          # Verify nested structure
+          jq -e '.check.total_issues' "$RESULTS_PATH" > /dev/null
+          jq -e '.dupes.stats.clone_groups' "$RESULTS_PATH" > /dev/null
+          jq -e '.health.summary.functions_above_threshold' "$RESULTS_PATH" > /dev/null
+          echo "Combined JSON validated: check + dupes + health, $ISSUES total issues"
+
+  test-comment:
+    name: Test PR comment
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 20
+
+      - name: Run action with PR comment
+        id: fallow
+        uses: ./
+        env:
+          FALLOW_SKIP_BINARY_VERIFY: "1"
+        with:
+          root: tests/fixtures/basic-project
+          format: json
+          fail-on-issues: false
+          comment: true
+          comment-id: action-smoke-test
+
+      - name: Verify comment was posted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          COMMENTS=$(gh api \
+            "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+            --jq '[.[] | select(.body | contains("<!-- fallow-id: action-smoke-test -->"))] | length')
+          if [ "$COMMENTS" -eq 0 ]; then
+            echo "::error::Expected a fallow PR comment but found none"
+            exit 1
+          fi
+          echo "Found $COMMENTS fallow comment(s)"
+
+      - name: Clean up smoke-test comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | contains("<!-- fallow-id: action-smoke-test -->")) | .id' |
+            while read -r COMMENT_ID; do
+              [ -n "$COMMENT_ID" ] || continue
+              gh api --method DELETE "repos/${GH_REPO}/issues/comments/${COMMENT_ID}"
+            done

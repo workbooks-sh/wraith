@@ -1,0 +1,4 @@
+{
+  "name": "dynamic-import-then",
+  "main": "src/index.ts"
+}

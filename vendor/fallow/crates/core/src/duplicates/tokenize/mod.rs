@@ -1,0 +1,224 @@
+use std::path::Path;
+
+use oxc_allocator::Allocator;
+use oxc_ast_visit::Visit;
+use oxc_parser::Parser;
+use oxc_span::{SourceType, Span};
+
+// Re-export all public types so existing `use ... tokenize::X` paths continue to work.
+pub use super::token_types::{
+    FileTokens, KeywordType, OperatorType, PunctuationType, SourceToken, TokenKind,
+};
+use super::token_visitor::TokenExtractor;
+
+/// Tokenize a source file into a sequence of normalized tokens.
+///
+/// For Vue/Svelte SFC files, extracts `<script>` blocks first and tokenizes
+/// their content, mirroring the main analysis pipeline's SFC handling.
+/// For Astro files, extracts frontmatter. For MDX files, extracts import/export statements.
+///
+/// When `strip_types` is true, TypeScript type annotations, interfaces, and type
+/// aliases are stripped from the token stream. This enables cross-language clone
+/// detection between `.ts` and `.js` files.
+///
+/// When `skip_imports` is true, ES `import` declarations are excluded from the
+/// token stream to reduce noise from sorted import blocks.
+#[must_use]
+pub fn tokenize_file(path: &Path, source: &str, skip_imports: bool) -> FileTokens {
+    tokenize_file_inner(path, source, false, skip_imports)
+}
+
+/// Tokenize a source file with optional type stripping for cross-language detection.
+#[must_use]
+pub fn tokenize_file_cross_language(
+    path: &Path,
+    source: &str,
+    strip_types: bool,
+    skip_imports: bool,
+) -> FileTokens {
+    tokenize_file_inner(path, source, strip_types, skip_imports)
+}
+
+fn tokenize_file_inner(
+    path: &Path,
+    source: &str,
+    strip_types: bool,
+    skip_imports: bool,
+) -> FileTokens {
+    use crate::extract::{extract_astro_frontmatter, extract_mdx_statements, is_sfc_file};
+
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    if is_sfc_file(path) {
+        return tokenize_sfc(source, strip_types, skip_imports);
+    }
+    if ext == "astro" {
+        return tokenize_astro(source, strip_types, skip_imports, extract_astro_frontmatter);
+    }
+    if ext == "mdx" {
+        return tokenize_mdx(source, strip_types, skip_imports, extract_mdx_statements);
+    }
+    if ext == "css" || ext == "scss" {
+        return empty_tokens(source);
+    }
+
+    tokenize_js_ts(path, source, strip_types, skip_imports)
+}
+
+/// Tokenize Vue/Svelte SFC `<script>` blocks.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "byte offsets are bounded by source size"
+)]
+fn tokenize_sfc(source: &str, strip_types: bool, skip_imports: bool) -> FileTokens {
+    let scripts = crate::extract::extract_sfc_scripts(source);
+    let mut all_tokens = Vec::new();
+    let mut atomic_invocation_spans = Vec::new();
+
+    for script in &scripts {
+        let source_type = match (script.is_typescript, script.is_jsx) {
+            (true, true) => SourceType::tsx(),
+            (true, false) => SourceType::ts(),
+            (false, true) => SourceType::jsx(),
+            (false, false) => SourceType::mjs(),
+        };
+        let allocator = Allocator::default();
+        let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
+
+        let mut extractor = TokenExtractor::new(strip_types, skip_imports);
+        extractor.visit_program(&parser_return.program);
+
+        let offset = script.byte_offset as u32;
+        for token in &mut extractor.tokens {
+            token.span = Span::new(token.span.start + offset, token.span.end + offset);
+        }
+        for span in &mut extractor.atomic_invocation_spans {
+            *span = Span::new(span.start + offset, span.end + offset);
+        }
+        all_tokens.extend(extractor.tokens);
+        atomic_invocation_spans.extend(extractor.atomic_invocation_spans);
+    }
+
+    FileTokens {
+        tokens: all_tokens,
+        atomic_invocation_spans,
+        source: source.to_string(),
+        line_count: source.lines().count().max(1),
+    }
+}
+
+/// Tokenize Astro frontmatter between `---` delimiters.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "byte offsets are bounded by source size"
+)]
+fn tokenize_astro(
+    source: &str,
+    strip_types: bool,
+    skip_imports: bool,
+    extract_fn: fn(&str) -> Option<fallow_extract::sfc::SfcScript>,
+) -> FileTokens {
+    if let Some(script) = extract_fn(source) {
+        let allocator = Allocator::default();
+        let parser_return = Parser::new(&allocator, &script.body, SourceType::ts()).parse();
+
+        let mut extractor = TokenExtractor::new(strip_types, skip_imports);
+        extractor.visit_program(&parser_return.program);
+
+        let offset = script.byte_offset as u32;
+        for token in &mut extractor.tokens {
+            token.span = Span::new(token.span.start + offset, token.span.end + offset);
+        }
+        for span in &mut extractor.atomic_invocation_spans {
+            *span = Span::new(span.start + offset, span.end + offset);
+        }
+
+        return FileTokens {
+            tokens: extractor.tokens,
+            atomic_invocation_spans: extractor.atomic_invocation_spans,
+            source: source.to_string(),
+            line_count: source.lines().count().max(1),
+        };
+    }
+    empty_tokens(source)
+}
+
+/// Tokenize MDX import/export statements.
+fn tokenize_mdx(
+    source: &str,
+    strip_types: bool,
+    skip_imports: bool,
+    extract_fn: fn(&str) -> String,
+) -> FileTokens {
+    let statements = extract_fn(source);
+    if !statements.is_empty() {
+        let allocator = Allocator::default();
+        let parser_return = Parser::new(&allocator, &statements, SourceType::jsx()).parse();
+
+        let mut extractor = TokenExtractor::new(strip_types, skip_imports);
+        extractor.visit_program(&parser_return.program);
+
+        return FileTokens {
+            tokens: extractor.tokens,
+            atomic_invocation_spans: extractor.atomic_invocation_spans,
+            source: source.to_string(),
+            line_count: source.lines().count().max(1),
+        };
+    }
+    empty_tokens(source)
+}
+
+/// Return empty tokens for a source file (CSS, no-frontmatter Astro, empty MDX).
+fn empty_tokens(source: &str) -> FileTokens {
+    FileTokens {
+        tokens: Vec::new(),
+        atomic_invocation_spans: Vec::new(),
+        source: source.to_string(),
+        line_count: source.lines().count().max(1),
+    }
+}
+
+/// Tokenize a standard JS/TS file, with JSX fallback for parse errors.
+fn tokenize_js_ts(path: &Path, source: &str, strip_types: bool, skip_imports: bool) -> FileTokens {
+    let source_type = match path.extension().and_then(|ext| ext.to_str()) {
+        Some("gts") => SourceType::ts(),
+        Some("gjs") => SourceType::mjs(),
+        _ => SourceType::from_path(path).unwrap_or_default(),
+    };
+    let stripped_glimmer_source = crate::extract::is_glimmer_file(path)
+        .then(|| crate::extract::strip_glimmer_templates(source))
+        .flatten();
+    let parser_source = stripped_glimmer_source.as_deref().unwrap_or(source);
+    let allocator = Allocator::default();
+    let parser_return = Parser::new(&allocator, parser_source, source_type).parse();
+
+    let mut extractor = TokenExtractor::new(strip_types, skip_imports);
+    extractor.visit_program(&parser_return.program);
+
+    // If parsing produced very few tokens relative to source size (likely parse errors
+    // from Flow types or JSX in .js files), retry with JSX/TSX source type as a fallback.
+    if extractor.tokens.len() < 5 && source.len() > 100 && !source_type.is_jsx() {
+        let jsx_type = if source_type.is_typescript() {
+            SourceType::tsx()
+        } else {
+            SourceType::jsx()
+        };
+        let allocator2 = Allocator::default();
+        let retry_return = Parser::new(&allocator2, parser_source, jsx_type).parse();
+        let mut retry_extractor = TokenExtractor::new(strip_types, skip_imports);
+        retry_extractor.visit_program(&retry_return.program);
+        if retry_extractor.tokens.len() > extractor.tokens.len() {
+            extractor = retry_extractor;
+        }
+    }
+
+    FileTokens {
+        tokens: extractor.tokens,
+        atomic_invocation_spans: extractor.atomic_invocation_spans,
+        source: source.to_string(),
+        line_count: source.lines().count().max(1),
+    }
+}
+
+#[cfg(test)]
+mod tests;

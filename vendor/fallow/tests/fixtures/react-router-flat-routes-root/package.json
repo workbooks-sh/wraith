@@ -1,0 +1,7 @@
+{
+  "name": "react-router-flat-routes-root",
+  "dependencies": {
+    "@react-router/dev": "^7.0.0",
+    "@react-router/fs-routes": "^7.0.0"
+  }
+}

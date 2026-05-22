@@ -1,0 +1,12 @@
+{
+  "name": "vite-solution-tsconfig-paths",
+  "private": true,
+  "dependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vue/tsconfig": "^0.7.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.0.0"
+  }
+}

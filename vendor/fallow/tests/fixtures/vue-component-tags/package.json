@@ -1,0 +1,7 @@
+{
+  "name": "vue-component-tags",
+  "main": "src/main.ts",
+  "dependencies": {
+    "vue": "^3.0.0"
+  }
+}

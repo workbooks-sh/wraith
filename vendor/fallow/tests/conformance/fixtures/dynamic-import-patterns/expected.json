@@ -1,0 +1,28 @@
+{
+  "total_issues": 3,
+  "unused_files": [
+    {
+      "path": "src/orphan.ts"
+    }
+  ],
+  "unused_exports": [
+    {
+      "path": "src/static-utils.ts",
+      "export_name": "unusedStaticHelper"
+    }
+  ],
+  "unused_types": [],
+  "unused_dependencies": [],
+  "unresolved_imports": [],
+  "duplicate_exports": [
+    {
+      "export_name": "render",
+      "locations": [
+        { "path": "src/pages/about.ts" },
+        { "path": "src/pages/contact.ts" },
+        { "path": "src/pages/home.ts" }
+      ]
+    }
+  ],
+  "circular_dependencies": []
+}

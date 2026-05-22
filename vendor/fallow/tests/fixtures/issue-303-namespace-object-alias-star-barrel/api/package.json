@@ -1,0 +1,7 @@
+{
+  "name": "@foo/bar",
+  "private": true,
+  "exports": {
+    ".": "./index.ts"
+  }
+}

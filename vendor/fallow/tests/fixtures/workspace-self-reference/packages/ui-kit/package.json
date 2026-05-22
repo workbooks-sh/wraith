@@ -1,0 +1,34 @@
+{
+  "name": "@repro/ui-kit",
+  "version": "1.0.0",
+  "private": true,
+  "module": "./dist/esm/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "default": "./dist/esm/index.js"
+    },
+    "./button": {
+      "types": "./dist/button/index.d.ts",
+      "import": "./dist/esm/button/index.js",
+      "default": "./dist/esm/button/index.js"
+    },
+    "./modal": {
+      "types": "./dist/modal/index.d.ts",
+      "import": "./dist/esm/modal/index.js",
+      "default": "./dist/esm/modal/index.js"
+    },
+    "./tabs": {
+      "types": "./dist/tabs/index.d.ts",
+      "import": "./dist/esm/tabs/index.js",
+      "default": "./dist/esm/tabs/index.js"
+    },
+    "./internal/base": {
+      "types": "./dist/internal/base/index.d.ts",
+      "import": "./dist/esm/internal/base/index.js",
+      "default": "./dist/esm/internal/base/index.js"
+    }
+  }
+}

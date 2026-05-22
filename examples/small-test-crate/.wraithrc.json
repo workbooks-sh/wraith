@@ -1,0 +1,10 @@
+{
+  "ignore": [
+    "target",
+    "node_modules",
+    ".git"
+  ],
+  "allow_dead": [],
+  "allow_unused_deps": [],
+  "treat_pub_crate_as_internal": true
+}

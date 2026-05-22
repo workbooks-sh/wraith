@@ -1,0 +1,7 @@
+{
+  "name": "tanstack-router-virtual-routes",
+  "dependencies": {
+    "@tanstack/react-start": "1.0.0",
+    "@tanstack/virtual-file-routes": "1.0.0"
+  }
+}

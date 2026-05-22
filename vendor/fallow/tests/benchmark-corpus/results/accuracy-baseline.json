@@ -1,0 +1,312 @@
+{
+  "corpus": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus",
+  "ground_truth_pairs": 7,
+  "negative_pairs": 5,
+  "modes": {
+    "strict": {
+      "total_groups": 28,
+      "true_positives": 4,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "negative_violations": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "pair_results": [
+        {
+          "id": "T1-dataproc",
+          "type": "type-1",
+          "matched": true,
+          "overlap_lines": 143,
+          "notes": "TP"
+        },
+        {
+          "id": "T1-cache",
+          "type": "type-1",
+          "matched": true,
+          "overlap_lines": 132,
+          "notes": "TP"
+        },
+        {
+          "id": "T2-http",
+          "type": "type-2",
+          "matched": false,
+          "overlap_lines": 0,
+          "notes": "TN (correctly not detected in this mode)"
+        },
+        {
+          "id": "T2-eventbus",
+          "type": "type-2",
+          "matched": false,
+          "overlap_lines": 0,
+          "notes": "TN (correctly not detected in this mode)"
+        },
+        {
+          "id": "T3-validator",
+          "type": "type-3",
+          "matched": true,
+          "overlap_lines": 32,
+          "notes": "TP"
+        },
+        {
+          "id": "T3-queue",
+          "type": "type-3",
+          "matched": true,
+          "overlap_lines": 25,
+          "notes": "TP"
+        },
+        {
+          "id": "T4-sort",
+          "type": "type-4",
+          "matched": false,
+          "overlap_lines": 0,
+          "notes": "TN (correctly not detected in this mode)"
+        }
+      ]
+    },
+    "mild": {
+      "total_groups": 28,
+      "true_positives": 4,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "negative_violations": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "pair_results": [
+        {
+          "id": "T1-dataproc",
+          "type": "type-1",
+          "matched": true,
+          "overlap_lines": 143,
+          "notes": "TP"
+        },
+        {
+          "id": "T1-cache",
+          "type": "type-1",
+          "matched": true,
+          "overlap_lines": 132,
+          "notes": "TP"
+        },
+        {
+          "id": "T2-http",
+          "type": "type-2",
+          "matched": false,
+          "overlap_lines": 0,
+          "notes": "TN (correctly not detected in this mode)"
+        },
+        {
+          "id": "T2-eventbus",
+          "type": "type-2",
+          "matched": false,
+          "overlap_lines": 0,
+          "notes": "TN (correctly not detected in this mode)"
+        },
+        {
+          "id": "T3-validator",
+          "type": "type-3",
+          "matched": true,
+          "overlap_lines": 32,
+          "notes": "TP"
+        },
+        {
+          "id": "T3-queue",
+          "type": "type-3",
+          "matched": true,
+          "overlap_lines": 25,
+          "notes": "TP"
+        },
+        {
+          "id": "T4-sort",
+          "type": "type-4",
+          "matched": false,
+          "overlap_lines": 0,
+          "notes": "TN (correctly not detected in this mode)"
+        }
+      ]
+    },
+    "weak": {
+      "total_groups": 29,
+      "true_positives": 4,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "negative_violations": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "pair_results": [
+        {
+          "id": "T1-dataproc",
+          "type": "type-1",
+          "matched": true,
+          "overlap_lines": 143,
+          "notes": "TP"
+        },
+        {
+          "id": "T1-cache",
+          "type": "type-1",
+          "matched": true,
+          "overlap_lines": 132,
+          "notes": "TP"
+        },
+        {
+          "id": "T2-http",
+          "type": "type-2",
+          "matched": false,
+          "overlap_lines": 0,
+          "notes": "TN (correctly not detected in this mode)"
+        },
+        {
+          "id": "T2-eventbus",
+          "type": "type-2",
+          "matched": false,
+          "overlap_lines": 0,
+          "notes": "TN (correctly not detected in this mode)"
+        },
+        {
+          "id": "T3-validator",
+          "type": "type-3",
+          "matched": true,
+          "overlap_lines": 32,
+          "notes": "TP"
+        },
+        {
+          "id": "T3-queue",
+          "type": "type-3",
+          "matched": true,
+          "overlap_lines": 25,
+          "notes": "TP"
+        },
+        {
+          "id": "T4-sort",
+          "type": "type-4",
+          "matched": false,
+          "overlap_lines": 0,
+          "notes": "TN (correctly not detected in this mode)"
+        }
+      ]
+    },
+    "semantic": {
+      "total_groups": 35,
+      "true_positives": 6,
+      "false_positives": 2,
+      "false_negatives": 0,
+      "negative_violations": 2,
+      "precision": 0.75,
+      "recall": 1.0,
+      "f1": 0.8571,
+      "pair_results": [
+        {
+          "id": "T1-dataproc",
+          "type": "type-1",
+          "matched": true,
+          "overlap_lines": 143,
+          "notes": "TP"
+        },
+        {
+          "id": "T1-cache",
+          "type": "type-1",
+          "matched": true,
+          "overlap_lines": 132,
+          "notes": "TP"
+        },
+        {
+          "id": "T2-http",
+          "type": "type-2",
+          "matched": true,
+          "overlap_lines": 136,
+          "notes": "TP"
+        },
+        {
+          "id": "T2-eventbus",
+          "type": "type-2",
+          "matched": true,
+          "overlap_lines": 123,
+          "notes": "TP"
+        },
+        {
+          "id": "T3-validator",
+          "type": "type-3",
+          "matched": true,
+          "overlap_lines": 35,
+          "notes": "TP"
+        },
+        {
+          "id": "T3-queue",
+          "type": "type-3",
+          "matched": true,
+          "overlap_lines": 25,
+          "notes": "TP"
+        },
+        {
+          "id": "T4-sort",
+          "type": "type-4",
+          "matched": true,
+          "overlap_lines": 16,
+          "notes": "FP (Type-4 should not be detected by token matching)"
+        }
+      ]
+    },
+    "defaults": {
+      "total_groups": 11,
+      "true_positives": 4,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "negative_violations": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "pair_results": [
+        {
+          "id": "T1-dataproc",
+          "type": "type-1",
+          "matched": true,
+          "overlap_lines": 143,
+          "notes": "Bonus (not expected but acceptable overlap)"
+        },
+        {
+          "id": "T1-cache",
+          "type": "type-1",
+          "matched": true,
+          "overlap_lines": 132,
+          "notes": "Bonus (not expected but acceptable overlap)"
+        },
+        {
+          "id": "T2-http",
+          "type": "type-2",
+          "matched": false,
+          "overlap_lines": 0,
+          "notes": "TN (correctly not detected in this mode)"
+        },
+        {
+          "id": "T2-eventbus",
+          "type": "type-2",
+          "matched": false,
+          "overlap_lines": 0,
+          "notes": "TN (correctly not detected in this mode)"
+        },
+        {
+          "id": "T3-validator",
+          "type": "type-3",
+          "matched": true,
+          "overlap_lines": 32,
+          "notes": "Bonus (not expected but acceptable overlap)"
+        },
+        {
+          "id": "T3-queue",
+          "type": "type-3",
+          "matched": true,
+          "overlap_lines": 25,
+          "notes": "Bonus (not expected but acceptable overlap)"
+        },
+        {
+          "id": "T4-sort",
+          "type": "type-4",
+          "matched": false,
+          "overlap_lines": 0,
+          "notes": "TN (correctly not detected in this mode)"
+        }
+      ]
+    }
+  }
+}

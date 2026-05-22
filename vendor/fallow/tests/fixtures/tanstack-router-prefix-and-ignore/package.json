@@ -1,0 +1,6 @@
+{
+  "name": "tanstack-router-prefix-and-ignore",
+  "dependencies": {
+    "@tanstack/react-router": "1.0.0"
+  }
+}

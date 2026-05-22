@@ -1,0 +1,9 @@
+{
+  "name": "scss-node-modules-resolution",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "bootstrap": "^5.3.0",
+    "animate.css": "^4.1.1"
+  }
+}

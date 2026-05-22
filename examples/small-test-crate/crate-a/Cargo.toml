@@ -1,0 +1,12 @@
+[package]
+name = "crate-a"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# `serde` is used by used_function. unused_unreferenced_dep is NOT used in source.
+serde = { version = "1", features = ["derive"] }
+unused_unreferenced_dep = { package = "log", version = "0.4" }

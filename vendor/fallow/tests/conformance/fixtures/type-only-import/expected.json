@@ -1,0 +1,22 @@
+{
+  "total_issues": 3,
+  "unused_files": [
+    {
+      "path": "src/consumer.ts"
+    }
+  ],
+  "unused_exports": [],
+  "unused_types": [
+    {
+      "path": "src/types.ts",
+      "export_name": "UnusedType"
+    },
+    {
+      "path": "src/types.ts",
+      "export_name": "UnusedInterface"
+    }
+  ],
+  "unused_dependencies": [],
+  "unresolved_imports": [],
+  "circular_dependencies": []
+}

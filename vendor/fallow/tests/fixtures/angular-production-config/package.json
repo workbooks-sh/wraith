@@ -1,0 +1,13 @@
+{
+  "name": "angular-production-config",
+  "main": "src/main.ts",
+  "scripts": {
+    "start": "ng serve",
+    "build": "ng build"
+  },
+  "dependencies": {
+    "@angular/core": "^19.0.0",
+    "@angular/platform-browser": "^19.0.0",
+    "@angular/router": "^19.0.0"
+  }
+}

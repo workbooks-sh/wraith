@@ -1,0 +1,22 @@
+[package]
+name = "fallow-v8-coverage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "V8 ScriptCoverage JSON parser and Istanbul-compatible normalizer for the fallow CLI"
+readme = "../../README.md"
+
+[lib]
+doctest = false
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

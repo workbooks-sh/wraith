@@ -1,0 +1,11 @@
+{
+  "name": "issue-195-cypress-spec-pattern",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "test": "cypress run"
+  },
+  "devDependencies": {
+    "cypress": "13.0.0"
+  }
+}

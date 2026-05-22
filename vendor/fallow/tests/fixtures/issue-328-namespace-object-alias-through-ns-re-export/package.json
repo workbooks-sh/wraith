@@ -1,0 +1,13 @@
+{
+  "name": "issue-328-namespace-object-alias-through-ns-re-export",
+  "private": true,
+  "exports": {
+    ".": "./consumer.ts"
+  },
+  "workspaces": [
+    "api"
+  ],
+  "dependencies": {
+    "@foo/bar": "workspace:*"
+  }
+}

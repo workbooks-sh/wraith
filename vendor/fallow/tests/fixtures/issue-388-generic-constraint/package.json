@@ -1,0 +1,5 @@
+{
+  "name": "issue-388-generic-constraint",
+  "private": true,
+  "main": "src/index.ts"
+}

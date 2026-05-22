@@ -1,0 +1,8 @@
+{
+  "name": "angular-scss-include-paths",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@angular/core": "^20.0.0"
+  }
+}

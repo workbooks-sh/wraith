@@ -1,0 +1,6 @@
+{
+  "name": "playwright-pom-fixtures-nested",
+  "devDependencies": {
+    "@playwright/test": "^1.0.0"
+  }
+}

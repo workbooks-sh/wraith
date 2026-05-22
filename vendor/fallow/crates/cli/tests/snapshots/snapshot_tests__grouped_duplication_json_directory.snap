@@ -1,0 +1,224 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\",)"
+---
+{
+  "schema_version": 6,
+  "version": "[VERSION]",
+  "elapsed_ms": 0,
+  "clone_groups": [
+    {
+      "instances": [
+        {
+          "file": "src/a.ts",
+          "start_line": 10,
+          "end_line": 20,
+          "start_col": 0,
+          "end_col": 1,
+          "fragment": "function a() { return 1; }"
+        },
+        {
+          "file": "src/b.ts",
+          "start_line": 5,
+          "end_line": 15,
+          "start_col": 0,
+          "end_col": 1,
+          "fragment": "function a() { return 1; }"
+        },
+        {
+          "file": "lib/c.ts",
+          "start_line": 30,
+          "end_line": 40,
+          "start_col": 0,
+          "end_col": 1,
+          "fragment": "function a() { return 1; }"
+        }
+      ],
+      "token_count": 25,
+      "line_count": 11,
+      "actions": [
+        {
+          "type": "extract-shared",
+          "auto_fixable": false,
+          "description": "Extract duplicated code (11 lines, 3 instances) into a shared function"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the duplicated code",
+          "comment": "// fallow-ignore-next-line code-duplication"
+        }
+      ]
+    },
+    {
+      "instances": [
+        {
+          "file": "lib/x.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "start_col": 0,
+          "end_col": 1,
+          "fragment": "const x = 1;"
+        },
+        {
+          "file": "lib/y.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "start_col": 0,
+          "end_col": 1,
+          "fragment": "const x = 1;"
+        }
+      ],
+      "token_count": 18,
+      "line_count": 8,
+      "actions": [
+        {
+          "type": "extract-shared",
+          "auto_fixable": false,
+          "description": "Extract duplicated code (8 lines, 2 instances) into a shared function"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the duplicated code",
+          "comment": "// fallow-ignore-next-line code-duplication"
+        }
+      ]
+    }
+  ],
+  "clone_families": [],
+  "stats": {
+    "total_files": 100,
+    "files_with_clones": 5,
+    "total_lines": 5000,
+    "duplicated_lines": 35,
+    "total_tokens": 25000,
+    "duplicated_tokens": 86,
+    "clone_groups": 2,
+    "clone_instances": 5,
+    "duplication_percentage": 0.7
+  },
+  "grouped_by": "directory",
+  "total_issues": 2,
+  "groups": [
+    {
+      "key": "lib",
+      "stats": {
+        "total_files": 100,
+        "files_with_clones": 2,
+        "total_lines": 5000,
+        "duplicated_lines": 16,
+        "total_tokens": 25000,
+        "duplicated_tokens": 36,
+        "clone_groups": 1,
+        "clone_instances": 2,
+        "duplication_percentage": 0.32
+      },
+      "clone_groups": [
+        {
+          "primary_owner": "lib",
+          "token_count": 18,
+          "line_count": 8,
+          "instances": [
+            {
+              "file": "lib/x.ts",
+              "start_line": 1,
+              "end_line": 8,
+              "start_col": 0,
+              "end_col": 1,
+              "fragment": "const x = 1;",
+              "owner": "lib"
+            },
+            {
+              "file": "lib/y.ts",
+              "start_line": 1,
+              "end_line": 8,
+              "start_col": 0,
+              "end_col": 1,
+              "fragment": "const x = 1;",
+              "owner": "lib"
+            }
+          ],
+          "actions": [
+            {
+              "type": "extract-shared",
+              "auto_fixable": false,
+              "description": "Extract duplicated code (8 lines, 2 instances) into a shared function"
+            },
+            {
+              "type": "suppress-line",
+              "auto_fixable": false,
+              "description": "Suppress with an inline comment above the duplicated code",
+              "comment": "// fallow-ignore-next-line code-duplication"
+            }
+          ]
+        }
+      ],
+      "clone_families": []
+    },
+    {
+      "key": "src",
+      "stats": {
+        "total_files": 100,
+        "files_with_clones": 3,
+        "total_lines": 5000,
+        "duplicated_lines": 33,
+        "total_tokens": 25000,
+        "duplicated_tokens": 75,
+        "clone_groups": 1,
+        "clone_instances": 3,
+        "duplication_percentage": 0.66
+      },
+      "clone_groups": [
+        {
+          "primary_owner": "src",
+          "token_count": 25,
+          "line_count": 11,
+          "instances": [
+            {
+              "file": "src/a.ts",
+              "start_line": 10,
+              "end_line": 20,
+              "start_col": 0,
+              "end_col": 1,
+              "fragment": "function a() { return 1; }",
+              "owner": "src"
+            },
+            {
+              "file": "src/b.ts",
+              "start_line": 5,
+              "end_line": 15,
+              "start_col": 0,
+              "end_col": 1,
+              "fragment": "function a() { return 1; }",
+              "owner": "src"
+            },
+            {
+              "file": "lib/c.ts",
+              "start_line": 30,
+              "end_line": 40,
+              "start_col": 0,
+              "end_col": 1,
+              "fragment": "function a() { return 1; }",
+              "owner": "lib"
+            }
+          ],
+          "actions": [
+            {
+              "type": "extract-shared",
+              "auto_fixable": false,
+              "description": "Extract duplicated code (11 lines, 3 instances) into a shared function"
+            },
+            {
+              "type": "suppress-line",
+              "auto_fixable": false,
+              "description": "Suppress with an inline comment above the duplicated code",
+              "comment": "// fallow-ignore-next-line code-duplication"
+            }
+          ]
+        }
+      ],
+      "clone_families": []
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "playwright-pom-fixtures",
+  "devDependencies": {
+    "@playwright/test": "^1.0.0"
+  }
+}

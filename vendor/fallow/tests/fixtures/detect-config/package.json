@@ -1,0 +1,8 @@
+{
+  "name": "detect-config",
+  "main": "src/index.ts",
+  "dependencies": {
+    "react": "^18.0.0",
+    "unused-dep": "^1.0.0"
+  }
+}

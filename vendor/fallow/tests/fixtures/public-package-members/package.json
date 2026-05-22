@@ -1,0 +1,5 @@
+{
+  "name": "public-package-members",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"]
+}

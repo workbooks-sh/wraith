@@ -1,0 +1,118 @@
+{
+  "$schema": "Ground truth for fallow duplication detection benchmark",
+  "description": "Each clone pair documents a known duplication relationship between two file regions. 'type' follows the standard clone taxonomy (Type-1 through Type-4). 'min_overlap_lines' is the minimum number of shared lines a correct detection should cover.",
+  "clone_pairs": [
+    {
+      "id": "T1-dataproc",
+      "type": "type-1",
+      "description": "Exact copy of DataProcessor class with all methods",
+      "file_a": "src/type1-exact/data-processor-a.ts",
+      "file_b": "src/type1-exact/data-processor-b.ts",
+      "region_a": { "start_line": 1, "end_line": 130 },
+      "region_b": { "start_line": 1, "end_line": 130 },
+      "min_overlap_lines": 80,
+      "expected_in_modes": ["strict", "mild", "weak", "semantic"]
+    },
+    {
+      "id": "T1-cache",
+      "type": "type-1",
+      "description": "Exact copy of LRUCache class",
+      "file_a": "src/type1-exact/cache-manager-a.ts",
+      "file_b": "src/type1-exact/cache-manager-b.ts",
+      "region_a": { "start_line": 1, "end_line": 120 },
+      "region_b": { "start_line": 1, "end_line": 120 },
+      "min_overlap_lines": 60,
+      "expected_in_modes": ["strict", "mild", "weak", "semantic"]
+    },
+    {
+      "id": "T2-http",
+      "type": "type-2",
+      "description": "HTTP client with renamed classes, methods, variables, and interface names. Same structure and logic, different identifiers.",
+      "file_a": "src/type2-renamed/http-client-a.ts",
+      "file_b": "src/type2-renamed/http-client-b.ts",
+      "region_a": { "start_line": 1, "end_line": 130 },
+      "region_b": { "start_line": 1, "end_line": 130 },
+      "min_overlap_lines": 40,
+      "expected_in_modes": ["semantic"]
+    },
+    {
+      "id": "T2-eventbus",
+      "type": "type-2",
+      "description": "Event bus / message broker with renamed types and methods. Identical structure.",
+      "file_a": "src/type2-renamed/event-bus-a.ts",
+      "file_b": "src/type2-renamed/event-bus-b.ts",
+      "region_a": { "start_line": 1, "end_line": 115 },
+      "region_b": { "start_line": 1, "end_line": 115 },
+      "min_overlap_lines": 40,
+      "expected_in_modes": ["semantic"]
+    },
+    {
+      "id": "T3-validator",
+      "type": "type-3",
+      "description": "Form validator with added rule types (email, range), modified error format (added severity, timestamp), added logging. Core validate/checkRule logic is shared.",
+      "file_a": "src/type3-near-miss/validator-a.ts",
+      "file_b": "src/type3-near-miss/validator-b.ts",
+      "region_a": { "start_line": 1, "end_line": 115 },
+      "region_b": { "start_line": 1, "end_line": 145 },
+      "min_overlap_lines": 30,
+      "expected_in_modes": ["strict", "mild", "weak", "semantic"],
+      "notes": "Strict/mild should find partial overlaps in the shared switch cases"
+    },
+    {
+      "id": "T3-queue",
+      "type": "type-3",
+      "description": "Priority queue with added methods (requeue, peekItem, getProcessedCount), added retryCount field. Core enqueue/binary-search and updatePriority logic is shared.",
+      "file_a": "src/type3-near-miss/queue-a.ts",
+      "file_b": "src/type3-near-miss/queue-b.ts",
+      "region_a": { "start_line": 1, "end_line": 95 },
+      "region_b": { "start_line": 1, "end_line": 125 },
+      "min_overlap_lines": 25,
+      "expected_in_modes": ["strict", "mild", "weak", "semantic"],
+      "notes": "Strict/mild should find the binary search insertion and updatePriority blocks"
+    },
+    {
+      "id": "T4-sort",
+      "type": "type-4",
+      "description": "Quicksort vs mergesort — same semantics, completely different implementation. Should NOT be detected by token-based tools.",
+      "file_a": "src/type4-semantic/sort-a.ts",
+      "file_b": "src/type4-semantic/sort-b.ts",
+      "region_a": { "start_line": 1, "end_line": 50 },
+      "region_b": { "start_line": 1, "end_line": 55 },
+      "min_overlap_lines": 10,
+      "expected_in_modes": [],
+      "notes": "Type-4 clones require semantic analysis beyond token matching. Token-based tools should NOT detect these. A detection here is a false positive unless it finds the binary search helper (which has legitimate Type-2 similarity)."
+    }
+  ],
+  "negative_pairs": [
+    {
+      "id": "NEG-auth-vs-cache",
+      "description": "Auth service vs LRU cache — both use Maps and have similar CRUD patterns but are semantically distinct",
+      "file_a": "src/negative/auth-service.ts",
+      "file_b": "src/type1-exact/cache-manager-a.ts"
+    },
+    {
+      "id": "NEG-watcher-vs-processor",
+      "description": "File watcher vs data processor — both extend EventEmitter with start/stop but different domains",
+      "file_a": "src/negative/file-watcher.ts",
+      "file_b": "src/type1-exact/data-processor-a.ts"
+    },
+    {
+      "id": "NEG-pool-vs-queue",
+      "description": "Connection pool vs priority queue — both manage ordered items with add/remove but different semantics",
+      "file_a": "src/negative/database-pool.ts",
+      "file_b": "src/type3-near-miss/queue-a.ts"
+    },
+    {
+      "id": "NEG-auth-vs-watcher",
+      "description": "Auth service vs file watcher — completely different domains",
+      "file_a": "src/negative/auth-service.ts",
+      "file_b": "src/negative/file-watcher.ts"
+    },
+    {
+      "id": "NEG-pool-vs-http",
+      "description": "Connection pool vs HTTP client — both do async request handling but different semantics",
+      "file_a": "src/negative/database-pool.ts",
+      "file_b": "src/type2-renamed/http-client-a.ts"
+    }
+  ]
+}

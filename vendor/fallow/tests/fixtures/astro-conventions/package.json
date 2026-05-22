@@ -1,0 +1,6 @@
+{
+  "name": "astro-conventions",
+  "devDependencies": {
+    "astro": "^5.0.0"
+  }
+}

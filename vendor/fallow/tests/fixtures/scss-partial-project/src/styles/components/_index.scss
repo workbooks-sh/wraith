@@ -1,0 +1,5 @@
+@use '../variables' as vars;
+
+.component {
+  color: vars.$primary-color;
+}

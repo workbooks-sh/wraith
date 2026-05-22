@@ -1,0 +1,7 @@
+{
+  "name": "issue-324-namespace-re-export",
+  "private": true,
+  "exports": {
+    ".": "./src/main.ts"
+  }
+}

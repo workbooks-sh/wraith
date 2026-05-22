@@ -1,0 +1,10 @@
+{
+  "name": "@issue/consumer",
+  "private": true,
+  "exports": {
+    ".": "./src/color-item.tsx"
+  },
+  "dependencies": {
+    "@issue/ui": "workspace:*"
+  }
+}

@@ -1,0 +1,49 @@
+[package]
+name = "fallow-extract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "AST extraction engine for fallow codebase intelligence (parser, complexity, SFC / Astro / MDX / CSS)"
+readme = "../../README.md"
+
+[lib]
+doctest = false
+
+[dependencies]
+fallow-types = { workspace = true }
+
+# Parsing & analysis
+oxc_allocator = { workspace = true }
+oxc_ast = { workspace = true }
+oxc_ast_visit = { workspace = true }
+oxc_parser = { workspace = true }
+oxc_semantic = { workspace = true }
+oxc_span = { workspace = true }
+oxc_str = { workspace = true }
+
+# Parallelism
+rayon = { workspace = true }
+
+# File system
+regex = { workspace = true }
+
+# Hashing
+xxhash-rust = { workspace = true }
+rustc-hash = { workspace = true }
+
+# Caching
+bitcode = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,11 @@
+{
+  "name": "tap-project",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "tap"
+  },
+  "devDependencies": {
+    "tap": "^21.0.0"
+  }
+}

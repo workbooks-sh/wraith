@@ -1,0 +1,7 @@
+@use 'variables' as vars;
+
+@mixin card-style {
+  padding: vars.$spacing-unit * 2;
+  border-radius: vars.$spacing-unit;
+  background: white;
+}

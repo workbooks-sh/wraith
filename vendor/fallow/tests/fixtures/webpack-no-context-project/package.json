@@ -1,0 +1,6 @@
+{
+  "name": "webpack-no-context-project",
+  "dependencies": {
+    "webpack": "^5.0.0"
+  }
+}

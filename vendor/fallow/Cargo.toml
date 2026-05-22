@@ -1,0 +1,229 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "2.77.0"
+edition = "2024"
+rust-version = "1.92"
+license = "MIT"
+repository = "https://github.com/fallow-rs/fallow"
+homepage = "https://docs.fallow.tools"
+documentation = "https://docs.fallow.tools"
+keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality"]
+categories = ["command-line-utilities", "development-tools"]
+
+[workspace.dependencies]
+fallow-core = { version = "2.77.0", path = "crates/core" }
+fallow-config = { version = "2.77.0", path = "crates/config" }
+fallow-extract = { version = "2.77.0", path = "crates/extract" }
+fallow-graph = { version = "2.77.0", path = "crates/graph" }
+fallow-types = { version = "2.77.0", path = "crates/types" }
+fallow-cli = { version = "2.77.0", path = "crates/cli" }
+
+# Parsing & analysis
+oxc_allocator = "0.126"
+oxc_ast = "0.126"
+oxc_ast_visit = "0.126"
+oxc_parser = "0.126"
+oxc_resolver = "11"
+oxc_semantic = "0.126"
+oxc_span = "0.126"
+oxc_str = "0.126"
+oxc_syntax = "0.126"
+oxc_coverage_instrument = "0.3"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+jsonc-parser = { version = "0.32", features = ["cst", "serde", "serde_json"] }
+toml = "1.1"
+toml_edit = "0.25"
+schemars = "1"
+
+# Parallelism
+rayon = "1"
+
+# File system
+dunce = "1"
+ignore = "0.4"
+glob = "0.3"
+globset = { version = "0.4", features = ["serde1"] }
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl", "unicode-case"] }
+
+# Hashing
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+rustc-hash = "2"
+
+# HTTP
+ureq = { version = "3", default-features = false, features = ["json", "rustls"] }
+
+# Caching
+bitcode = "0.6"
+
+# Diagnostics & output
+colored = "3"
+indicatif = "0.18"
+miette = { version = "7" }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Graph
+fixedbitset = "0.5"
+
+# LSP
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "process", "signal", "time"] }
+
+# File watching
+notify = "8"
+notify-debouncer-mini = "0.7"
+
+# Testing
+criterion = { version = "0.8", features = ["html_reports"] }
+dhat = "0.3"
+insta = { version = "1", features = ["yaml"] }
+proptest = "1"
+tempfile = "3"
+
+# Windows-only Win32 bindings (process query for audit orphan sweep, console control handler for signals)
+windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_System_Console"] }
+
+# Signal handling (Unix-only; Windows uses windows-sys::SetConsoleCtrlHandler directly)
+signal-hook = { version = "0.4", default-features = false, features = ["iterator"] }
+
+[workspace.lints.clippy]
+# Lint groups (priority -1 so individual overrides take precedence)
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+
+# Restriction lints — catch common mistakes and enforce discipline
+dbg_macro = "warn"
+todo = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+clone_on_ref_ptr = "warn"              # Force Arc::clone() / Rc::clone() explicitness
+empty_drop = "warn"                     # Catch no-op Drop impls
+empty_structs_with_brackets = "warn"    # Use `struct Foo;` not `struct Foo {}`
+exit = "warn"                           # Prevent silent process::exit()
+get_unwrap = "warn"                     # Prefer .get() over [] indexing
+rc_buffer = "warn"                      # Prevent Rc<Vec<T>> anti-pattern
+rc_mutex = "warn"                       # Prevent Rc<Mutex<T>> anti-pattern
+undocumented_unsafe_blocks = "warn"     # All unsafe must have SAFETY comment
+unnecessary_safety_comment = "warn"     # No pointless SAFETY comments on safe code
+unused_result_ok = "warn"              # Don't silently ignore Result::ok()
+infinite_loop = "warn"                  # Catch infinite loops without break
+self_named_module_files = "warn"        # Prefer mod.rs style
+pathbuf_init_then_push = "warn"         # Use PathBuf::from() directly
+excessive_nesting = "warn"              # Catch deeply nested control flow (threshold in .clippy.toml)
+allow_attributes_without_reason = "warn" # Force reason on #[allow] to catch unjustified suppressions
+unimplemented = "warn"                  # Catch leftover unimplemented!() calls
+filetype_is_file = "warn"               # FileType::is_file() misses symlinks — use !is_dir()
+rest_pat_in_fully_bound_structs = "warn" # Catch `..` in patterns where all fields are already bound
+pub_underscore_fields = "warn"           # Catch accidentally public _-prefixed fields
+non_zero_suggestions = "warn"            # Suggest NonZero types for naturally non-zero values
+precedence_bits = "warn"                 # Catch bitwise operator precedence mistakes
+map_with_unused_argument_over_ranges = "warn" # Use `repeat`/`repeat_with` instead
+
+# Allow common pedantic false positives
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_possible_wrap = "allow"
+too_many_lines = "warn"                 # SIG unit size — threshold in .clippy.toml
+items_after_statements = "allow"
+single_match_else = "allow"
+if_not_else = "allow"
+redundant_closure_for_method_calls = "allow"
+similar_names = "allow"
+wildcard_imports = "allow"
+unnested_or_patterns = "allow"
+doc_markdown = "allow"                  # False positives on technical terms
+too_long_first_doc_paragraph = "allow"  # Too strict for module-level docs
+struct_excessive_bools = "allow"        # CLI filter structs need many bools
+fn_params_excessive_bools = "allow"     # Same reason
+
+# Allow nursery lints that are too noisy or have false positives
+option_if_let_else = "allow"            # Too many false positives in match-heavy code
+missing_const_for_fn = "allow"          # Not a const library
+fallible_impl_from = "allow"            # From impls that can fail are intentional
+use_self = "allow"                      # Too noisy with generics
+
+# Allow cargo lints that are unavoidable
+multiple_crate_versions = "allow"       # Transitive dependency version conflicts
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+unsafe_op_in_unsafe_fn = "warn"         # Require unsafe blocks even inside unsafe fn
+unused_unsafe = "warn"                  # Catch unnecessary unsafe blocks
+non_ascii_idents = "warn"              # Prevent non-ASCII identifiers
+unit_bindings = "warn"                 # Catch useless `let _ = expr` bindings
+tail_expr_drop_order = "warn"          # Catch temporaries dropped in surprising order
+
+# Dev profile: disable debug info for faster builds
+[profile.dev]
+debug = false
+
+[profile.test]
+debug = false
+
+# Optimize proc-macro crates in dev for faster compilation
+[profile.dev.package.serde_derive]
+opt-level = 1
+[profile.dev.package.clap_derive]
+opt-level = 1
+
+# Optimize snapshot testing deps in dev
+[profile.dev.package.insta]
+opt-level = 3
+[profile.dev.package.similar]
+opt-level = 3
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"
+opt-level = 3
+panic = "abort"                         # Smaller binary — no unwind tables needed
+
+# Profile-with-debug: release-equivalent codegen + debuginfo retained.
+# Use for samply / Instruments / perf without enabling LTO+strip in the
+# regular release profile.
+[profile.release-debug]
+inherits = "release"
+strip = "none"
+debug = "full"
+
+# Optimize heavy deps for size — not in the hot path
+[profile.release.package.regex-syntax]
+opt-level = "z"
+[profile.release.package.clap_builder]
+opt-level = "z"
+[profile.release.package.schemars]
+opt-level = "z"
+[profile.release.package.ureq]
+opt-level = "z"
+[profile.release.package.miette]
+opt-level = "z"
+[profile.release.package.toml]
+opt-level = "z"
+[profile.release.package.toml_parser]
+opt-level = "z"
+[profile.release.package.url]
+opt-level = "z"
+[profile.release.package.indicatif]
+opt-level = "z"
+[profile.release.package.tracing-subscriber]
+opt-level = "z"

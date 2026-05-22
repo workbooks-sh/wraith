@@ -1,0 +1,6 @@
+{
+  "expo": {
+    "name": "expo-router-conventions",
+    "plugins": [["expo-router", { "root": "src/app" }]]
+  }
+}

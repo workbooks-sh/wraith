@@ -1,0 +1,7 @@
+{
+  "name": "optional-deps",
+  "main": "src/index.ts",
+  "optionalDependencies": {
+    "unused-optional-pkg": "^1.0.0"
+  }
+}

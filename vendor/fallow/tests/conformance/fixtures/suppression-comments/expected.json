@@ -1,0 +1,18 @@
+{
+  "total_issues": 2,
+  "unused_files": [
+    {
+      "path": "src/unsuppressed-orphan.ts"
+    }
+  ],
+  "unused_exports": [
+    {
+      "path": "src/lib.ts",
+      "export_name": "unsuppressedUnused"
+    }
+  ],
+  "unused_types": [],
+  "unused_dependencies": [],
+  "unresolved_imports": [],
+  "circular_dependencies": []
+}

@@ -1,0 +1,107 @@
+name: Module Coupling
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/coupling.yml'
+      - '.github/scripts/coupling-check.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/coupling.yml'
+      - '.github/scripts/coupling-check.py'
+  workflow_dispatch:
+
+concurrency:
+  group: coupling-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coupling:
+    name: Module coupling analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Soft-fail: cargo-modules (via cargo_metadata) occasionally lags new cargo
+    # releases, e.g. the Rust 1.95 removal of `--lockfile-path`. This is a
+    # metric-tracking job, not a correctness gate — don't block main on it.
+    continue-on-error: true
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: coupling
+
+      - name: Install cargo-modules
+        # Intentionally not `--locked`: lets cargo pick up any cargo_metadata
+        # fix that ships ahead of a new cargo-modules release.
+        run: cargo install cargo-modules
+
+      - name: Collect module dependency graphs
+        id: collect
+        # Note: --acyclic is intentionally omitted. cargo-modules reports
+        # struct-to-method relationships (e.g. Foo -> Foo::bar) as circular
+        # dependencies even with --no-fns, producing false positives.
+        # Cycle detection is handled by fallow's own --circular-deps instead.
+        run: |
+          CARGO_MODULES_BIN="${CARGO_HOME:-$HOME/.cargo}/bin/cargo-modules"
+          : > coupling-dot.txt
+          failures=0
+          for crate in fallow-config fallow-types fallow-extract fallow-graph fallow-core fallow-cli; do
+            if "$CARGO_MODULES_BIN" dependencies --lib -p "$crate" \
+              --no-externs --no-fns --no-sysroot --no-traits --no-types --no-owns \
+              >> coupling-dot.txt 2>/tmp/cargo-modules.stderr; then
+              continue
+            fi
+            echo "::warning::cargo-modules failed for $crate"
+            cat /tmp/cargo-modules.stderr >&2
+            failures=$((failures + 1))
+          done
+          if [ ! -s coupling-dot.txt ]; then
+            {
+              echo "## Module Coupling"
+              echo ""
+              echo "cargo-modules could not collect dependency graphs (failed for $failures crate(s)); coupling metrics skipped for this run."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "collected=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "collected=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Analyze coupling metrics
+        if: steps.collect.outputs.collected == 'true'
+        run: |
+          python3 .github/scripts/coupling-check.py \
+            --max-fan-in 20 --max-fan-out 20 \
+            --json coupling-bench.json \
+            --warn-only \
+            < coupling-dot.txt | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Store coupling metrics
+        if: steps.collect.outputs.collected == 'true'
+        uses: ./.github/actions/store-benchmark
+        with:
+          name: Module Coupling
+          tool: customSmallerIsBetter
+          output-file-path: coupling-bench.json
+          data-dir: coupling
+          alert-threshold: '150%'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          continue-on-error: ${{ github.event_name == 'pull_request' }}

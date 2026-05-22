@@ -1,0 +1,13 @@
+{
+  "name": "issue-358-custom-eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint -c .config/eslint.config.js"
+  },
+  "dependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.3.0"
+  }
+}

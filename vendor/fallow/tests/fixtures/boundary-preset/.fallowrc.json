@@ -1,0 +1,6 @@
+{
+  "entry": ["src/adapters/http.ts"],
+  "boundaries": {
+    "preset": "hexagonal"
+  }
+}

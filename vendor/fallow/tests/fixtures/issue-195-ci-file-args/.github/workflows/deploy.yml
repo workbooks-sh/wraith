@@ -1,0 +1,10 @@
+name: deploy
+on: [push]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          tsc scripts/gh-deploy.ts
+          node scripts/gh-deploy.js prod

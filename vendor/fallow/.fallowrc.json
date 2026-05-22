@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "ignorePatterns": [
+    "tests/fixtures/**",
+    "tests/conformance/fixtures/**",
+    "editors/vscode/test/integration/fixtures/**"
+  ]
+}

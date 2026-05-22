@@ -1,0 +1,28 @@
+[package]
+name = "fallow-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "MCP server for fallow codebase intelligence (exposes fallow as typed tools to AI agents)"
+readme = "../../README.md"
+
+[[bin]]
+name = "fallow-mcp"
+path = "src/main.rs"
+
+[dependencies]
+rmcp = { version = "1.6", features = ["transport-io"] }
+tokio.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+schemars.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

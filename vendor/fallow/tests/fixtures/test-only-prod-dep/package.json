@@ -1,0 +1,11 @@
+{
+  "name": "test-only-prod-dep",
+  "main": "src/index.ts",
+  "dependencies": {
+    "lodash": "^4.0.0",
+    "test-utils-lib": "^1.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0"
+  }
+}

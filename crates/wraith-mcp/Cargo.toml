@@ -1,0 +1,15 @@
+[package]
+name = "wraith-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "wraith-mcp"
+path = "src/main.rs"
+
+[dependencies]
+wraith-core = { path = "../wraith-core" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true

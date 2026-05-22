@@ -1,0 +1,12 @@
+---
+source: crates/cli/tests/health_tests.rs
+expression: redacted
+---
+■ Metrics: 21 LOC · dead files 33.3% · dead exports 0.0% · avg cyclomatic 7.0 · p90 cyclomatic 13 · maintainability 85.8 (good)
+
+● High complexity functions (1)
+  src/complex.ts
+    :1 classify CRITICAL
+          13 cyclomatic   13 cognitive   15 lines
+         182.0 CRAP
+  Functions exceeding cyclomatic, cognitive, or CRAP thresholds (https://docs.fallow.tools/explanations/health#complexity-metrics)

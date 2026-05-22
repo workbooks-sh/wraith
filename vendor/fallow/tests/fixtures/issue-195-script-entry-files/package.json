@@ -1,0 +1,9 @@
+{
+  "name": "issue-195-script-entry-files",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "deploy": "tsc ./scripts/deploy.ts && node ./scripts/deploy.js"
+  }
+}

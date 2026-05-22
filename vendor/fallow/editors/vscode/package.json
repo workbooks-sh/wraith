@@ -1,0 +1,435 @@
+{
+  "name": "fallow-vscode",
+  "displayName": "Fallow",
+  "description": "Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for unused code, duplication, complexity hotspots, and architecture drift, with optional runtime evidence via Fallow Runtime.",
+  "version": "2.48.1",
+  "packageManager": "pnpm@10.33.0",
+  "publisher": "fallow-rs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fallow-rs/fallow",
+    "directory": "editors/vscode"
+  },
+  "icon": "icon.png",
+  "homepage": "https://docs.fallow.tools",
+  "bugs": {
+    "url": "https://github.com/fallow-rs/fallow/issues"
+  },
+  "qna": "https://github.com/fallow-rs/fallow/issues",
+  "galleryBanner": {
+    "color": "#2d2d2d",
+    "theme": "dark"
+  },
+  "badges": [
+    {
+      "url": "https://img.shields.io/visual-studio-marketplace/v/fallow-rs.fallow-vscode",
+      "href": "https://marketplace.visualstudio.com/items?itemName=fallow-rs.fallow-vscode",
+      "description": "VS Code Marketplace Version"
+    },
+    {
+      "url": "https://img.shields.io/crates/v/fallow-cli",
+      "href": "https://crates.io/crates/fallow-cli",
+      "description": "crates.io Version"
+    }
+  ],
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "codebase-analyzer",
+    "unused",
+    "exports",
+    "dependencies",
+    "duplication",
+    "complexity",
+    "typescript",
+    "javascript",
+    "knip",
+    "monorepo",
+    "circular-dependencies"
+  ],
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "activationEvents": [
+    "workspaceContains:**/package.json"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "jsonValidation": [
+      {
+        "fileMatch": [
+          ".fallowrc.json",
+          ".fallowrc.jsonc"
+        ],
+        "url": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "fallow.analyze",
+        "title": "Fallow: Run Analysis",
+        "icon": "$(search)"
+      },
+      {
+        "command": "fallow.fix",
+        "title": "Fallow: Auto-Fix (unexport unused, remove unused deps)"
+      },
+      {
+        "command": "fallow.fixDryRun",
+        "title": "Fallow: Preview Fixes (Dry Run)"
+      },
+      {
+        "command": "fallow.restart",
+        "title": "Fallow: Restart Language Server"
+      },
+      {
+        "command": "fallow.showOutput",
+        "title": "Fallow: Show Output Channel"
+      },
+      {
+        "command": "fallow.openSidebar",
+        "title": "Fallow: Open Sidebar"
+      },
+      {
+        "command": "fallow.openSettings",
+        "title": "Fallow: Open Settings"
+      },
+      {
+        "command": "fallow.noop",
+        "title": "Fallow: No-op (internal)"
+      },
+      {
+        "command": "fallow.toggleMuteDuplicates",
+        "title": "Fallow: Toggle Mute Code-Duplication Findings",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "fallow.toggleAllDiagnostics",
+        "title": "Fallow: Toggle Mute All Findings",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "fallow.manageDiagnosticMutes",
+        "title": "Fallow: Manage Diagnostic Mutes...",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "fallow.clearDiagnosticMutes",
+        "title": "Fallow: Show All Findings (Clear Mutes)"
+      },
+      {
+        "command": "fallow.muteDiagnosticCategory",
+        "title": "Fallow: Mute Diagnostic Category"
+      }
+    ],
+    "configuration": {
+      "title": "Fallow",
+      "properties": {
+        "fallow.lspPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the fallow-lsp binary. Leave empty for auto-detection."
+        },
+        "fallow.configPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to a Fallow config file. Relative paths are resolved from the workspace root (the first folder, in multi-root workspaces). Mirrors the CLI's `--config` flag. Empty = auto-discover `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`."
+        },
+        "fallow.autoDownload": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically download the fallow-lsp binary if not found."
+        },
+        "fallow.issueTypes": {
+          "type": "object",
+          "default": {
+            "unused-files": true,
+            "unused-exports": true,
+            "unused-types": true,
+            "private-type-leaks": true,
+            "unused-dependencies": true,
+            "unused-dev-dependencies": true,
+            "unused-optional-dependencies": true,
+            "unused-enum-members": true,
+            "unused-class-members": true,
+            "unresolved-imports": true,
+            "unlisted-dependencies": true,
+            "duplicate-exports": true,
+            "type-only-dependencies": true,
+            "test-only-dependencies": true,
+            "circular-dependencies": true,
+            "re-export-cycles": true,
+            "boundary-violation": true,
+            "stale-suppressions": true,
+            "unused-catalog-entries": true,
+            "unresolved-catalog-references": true,
+            "unused-dependency-overrides": true,
+            "misconfigured-dependency-overrides": true
+          },
+          "description": "Toggle individual issue types on or off. Uses kebab-case names matching fallow's rules config.",
+          "properties": {
+            "unused-files": {
+              "type": "boolean"
+            },
+            "unused-exports": {
+              "type": "boolean"
+            },
+            "unused-types": {
+              "type": "boolean"
+            },
+            "private-type-leaks": {
+              "type": "boolean"
+            },
+            "unused-dependencies": {
+              "type": "boolean"
+            },
+            "unused-dev-dependencies": {
+              "type": "boolean"
+            },
+            "unused-optional-dependencies": {
+              "type": "boolean"
+            },
+            "unused-enum-members": {
+              "type": "boolean"
+            },
+            "unused-class-members": {
+              "type": "boolean"
+            },
+            "unresolved-imports": {
+              "type": "boolean"
+            },
+            "unlisted-dependencies": {
+              "type": "boolean"
+            },
+            "duplicate-exports": {
+              "type": "boolean"
+            },
+            "type-only-dependencies": {
+              "type": "boolean"
+            },
+            "test-only-dependencies": {
+              "type": "boolean"
+            },
+            "circular-dependencies": {
+              "type": "boolean"
+            },
+            "re-export-cycles": {
+              "type": "boolean"
+            },
+            "boundary-violation": {
+              "type": "boolean"
+            },
+            "stale-suppressions": {
+              "type": "boolean"
+            },
+            "unused-catalog-entries": {
+              "type": "boolean"
+            },
+            "unresolved-catalog-references": {
+              "type": "boolean"
+            },
+            "unused-dependency-overrides": {
+              "type": "boolean"
+            },
+            "misconfigured-dependency-overrides": {
+              "type": "boolean"
+            }
+          }
+        },
+        "fallow.duplication.threshold": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "Minimum number of lines for a code block to be reported as a duplicate."
+        },
+        "fallow.duplication.mode": {
+          "type": "string",
+          "default": "mild",
+          "enum": [
+            "strict",
+            "mild",
+            "weak",
+            "semantic"
+          ],
+          "description": "Duplication detection mode.",
+          "enumDescriptions": [
+            "Exact token matching",
+            "Normalized syntax (default)",
+            "Ignores different literals",
+            "Renames variables for semantic matching"
+          ]
+        },
+        "fallow.production": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable production mode (excludes test/dev files, only production scripts)."
+        },
+        "fallow.changedSince": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Show only issues in files changed since the given git ref. Tag your current commit (`git tag fallow-baseline`) and set this to the tag name to keep existing issues hidden while flagging new ones in the Problems panel. Mirrors the CLI's `--changed-since`. Empty = full scope."
+        },
+        "fallow.trace.server": {
+          "type": "string",
+          "default": "off",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "description": "Trace level for the LSP server communication."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "fallow",
+          "title": "Fallow",
+          "icon": "assets/icon-sidebar.svg"
+        }
+      ]
+    },
+    "views": {
+      "fallow": [
+        {
+          "id": "fallow.deadCode",
+          "name": "Unused Code"
+        },
+        {
+          "id": "fallow.duplicates",
+          "name": "Duplicates"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "fallow.analyze",
+          "when": "view == fallow.deadCode || view == fallow.duplicates",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "fallow.muteDiagnosticCategory",
+          "when": "false"
+        },
+        {
+          "command": "fallow.noop",
+          "when": "false"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "fallow.deadCode",
+        "contents": "No analysis results yet.\n[$(search) Run Analysis](command:fallow.analyze)\nFallow finds unused files, exports, dependencies, and more.",
+        "when": "!fallow.hasAnalyzed"
+      },
+      {
+        "view": "fallow.deadCode",
+        "contents": "$(check) No unused code found.",
+        "when": "fallow.hasAnalyzed"
+      },
+      {
+        "view": "fallow.duplicates",
+        "contents": "No duplication results yet.\n[$(search) Run Analysis](command:fallow.analyze)\nFallow detects duplicated code blocks across your project.",
+        "when": "!fallow.hasAnalyzed"
+      },
+      {
+        "view": "fallow.duplicates",
+        "contents": "$(check) No code duplication found.",
+        "when": "fallow.hasAnalyzed"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "fallow.gettingStarted",
+        "title": "Get Started with Fallow",
+        "description": "Analyze your TypeScript/JavaScript codebase for unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations.",
+        "steps": [
+          {
+            "id": "fallow.gettingStarted.analyze",
+            "title": "Run your first analysis",
+            "description": "Fallow analyzes your codebase for unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations.\n\nOpen the Command Palette and run **Fallow: Run Analysis**, or click the search icon in the Fallow sidebar.\n\n[Run Analysis](command:fallow.analyze)",
+            "media": {
+              "markdown": "media/step-analyze.md"
+            },
+            "completionEvents": [
+              "onCommand:fallow.analyze"
+            ]
+          },
+          {
+            "id": "fallow.gettingStarted.explore",
+            "title": "Explore the results",
+            "description": "After analysis completes, results appear across multiple surfaces in your editor.\n\nClick any item in the Fallow sidebar to jump to it in the editor.\n\n[Open Fallow Sidebar](command:fallow.openSidebar)",
+            "media": {
+              "markdown": "media/step-explore.md"
+            },
+            "completionEvents": [
+              "onCommand:fallow.openSidebar"
+            ]
+          },
+          {
+            "id": "fallow.gettingStarted.fix",
+            "title": "Fix an issue",
+            "description": "Auto-fix removes the `export` keyword from unused exports (keeping the code) and removes unused dependencies from package.json.\n\n[Auto-Fix](command:fallow.fix) · [Preview Fixes](command:fallow.fixDryRun)",
+            "media": {
+              "markdown": "media/step-fix.md"
+            },
+            "completionEvents": [
+              "onCommand:fallow.fix"
+            ]
+          },
+          {
+            "id": "fallow.gettingStarted.configure",
+            "title": "Configure rules",
+            "description": "Customize which checks to run and how strict they are.\n\n[Open Fallow Settings](command:fallow.openSettings)",
+            "media": {
+              "markdown": "media/step-configure.md"
+            },
+            "completionEvents": [
+              "onCommand:fallow.openSettings"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "codegen:types": "node ./scripts/codegen-types.mjs",
+    "check:codegen": "node ./scripts/codegen-types.mjs --check",
+    "prebuild": "pnpm run codegen:types",
+    "build": "rolldown -c",
+    "watch": "rolldown -c --watch",
+    "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "pnpm run test:unit && pnpm run test:integration",
+    "test:unit": "vitest run",
+    "test:integration": "pnpm run build && tsc -p tsconfig.test.json && node ./.test-dist/test/integration/runTest.js",
+    "prepackage": "pnpm run codegen:types && cp ../../LICENSE ./LICENSE",
+    "package": "vsce package --no-dependencies",
+    "publish": "vsce publish --no-dependencies",
+    "publish:ovsx": "ovsx publish --no-dependencies"
+  },
+  "dependencies": {
+    "vscode-languageclient": "9.0.1",
+    "vscode-languageserver-protocol": "3.17.5"
+  },
+  "devDependencies": {
+    "@types/node": "25.7.0",
+    "@types/vscode": "1.96.0",
+    "@types/mocha": "10.0.10",
+    "@vscode/test-electron": "2.5.2",
+    "@vscode/vsce": "3.9.1",
+    "json-schema-to-typescript": "15.0.4",
+    "mocha": "11.7.5",
+    "rolldown": "1.0.0",
+    "ovsx": "0.10.12",
+    "typescript": "6.0.3",
+    "vitest": "4.1.6"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "total_issues": 5,
+  "unused_files": [],
+  "unused_exports": [
+    {
+      "path": "src/helpers.ts",
+      "export_name": "unusedHelper"
+    },
+    {
+      "path": "src/helpers.ts",
+      "export_name": "anotherUnusedHelper"
+    },
+    {
+      "path": "src/helpers.ts",
+      "export_name": "yetAnotherUnused"
+    }
+  ],
+  "unused_types": [
+    {
+      "path": "src/config.ts",
+      "export_name": "UnusedConfig"
+    },
+    {
+      "path": "src/config.ts",
+      "export_name": "UnusedAlias"
+    }
+  ],
+  "unused_dependencies": [],
+  "unresolved_imports": [],
+  "circular_dependencies": []
+}

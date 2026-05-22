@@ -1,0 +1,453 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Deny all permissions by default — grant per-job as needed
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      vscode: ${{ steps.filter.outputs.vscode }}
+      zed: ${{ steps.filter.outputs.zed }}
+      npm: ${{ steps.filter.outputs.npm }}
+      actions: ${{ steps.filter.outputs.actions }}
+      miri: ${{ steps.filter.outputs.miri }}
+      ci-scripts: ${{ steps.filter.outputs.ci-scripts }}
+      npm-package: ${{ steps.filter.outputs.npm-package }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        with:
+          filters: |
+            # The `rust` filter gates the `check` job, which runs two drift
+            # gates:
+            #   - `cargo test/clippy --features schema-emit` for the
+            #     Rust-source -> docs/output-schema.json chain (output schema)
+            #   - `cargo test --workspace --all-targets` (the existing step)
+            #     for the FallowConfig -> schema.json chain (config-input
+            #     schema, #440), via a `#[cfg(test)] mod config_schema_drift`
+            #     test in `crates/cli/src/init.rs`.
+            # JsonSchema-deriving structs are spread across multiple crates;
+            # keeping the filter at `crates/**` (rather than a narrower
+            # per-crate list) ensures edits to ANY of the following subtrees
+            # trigger the gate:
+            #   - crates/types/src/                       (finding structs)
+            #   - crates/core/src/duplicates/types.rs     (CloneFamily, CloneGroup, AttributedCloneGroup)
+            #   - crates/cli/src/health_types/            (ComplexityViolation, HealthFinding, hotspots, refactoring, coverage)
+            #   - crates/cli/src/output_envelope.rs       (FallowOutput enum + per-command envelopes)
+            #   - crates/config/src/config/              (FallowConfig + RulesConfig + presets, source of schema.json)
+            # Both `docs/output-schema.json` and `schema.json` are included so
+            # PR edits that ONLY touch a committed schema (without a matching
+            # Rust change) still trigger the drift gate on the PR rather than
+            # slipping through to a push-time failure on main. Refs #416, #440.
+            rust:
+              - 'crates/**'
+              - 'tests/**'
+              - 'docs/output-schema.json'
+              - 'schema.json'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'deny.toml'
+              - '.clippy.toml'
+              - 'rust-toolchain.toml'
+            vscode:
+              - 'editors/vscode/**'
+            zed:
+              - 'editors/zed/**'
+            npm:
+              - 'npm/**'
+            actions:
+              - '.github/**'
+            miri:
+              - 'crates/graph/**'
+              - 'crates/extract/**'
+              - 'crates/types/**'
+              - 'crates/config/**'
+            ci-scripts:
+              - 'ci/**'
+              - 'action/**'
+            npm-package:
+              - 'npm/fallow/**'
+              - 'schema.json'
+              - '.github/workflows/ci.yml'
+
+  check:
+    name: Check (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # PR runs ubuntu only (fast feedback, free for public repos).
+        # Push to main also runs windows-latest as a pre-release safety net so
+        # Windows path bugs (backslash separators, UNC paths, long-path `\\?\`,
+        # case insensitivity) surface before a release tag is cut rather than
+        # via user reports. Same structural pattern as the `zed` job below.
+        # macOS minutes are 10x quota multiplier on GitHub Free org plans;
+        # Windows is 2x. macOS coverage is via local pre-release runs.
+        # Refs #447.
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy, rustfmt
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      - name: Run tests
+        run: cargo test --workspace --all-targets
+
+      - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
+        run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests
+
+      - name: Run schema drift gate (feature-gated schema-emit binary)
+        run: cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Clippy (test-sidecar-key feature)
+        run: cargo clippy -p fallow-cli --features test-sidecar-key --all-targets -- -D warnings
+
+      - name: Clippy (schema-emit feature)
+        run: cargo clippy -p fallow-cli --features schema-emit --bin fallow-schema-emit --tests -- -D warnings
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Install NAPI package dependencies
+        run: cd crates/napi && npm ci --omit=optional
+
+      - name: Build NAPI package
+        run: cd crates/napi && npm run build:debug
+
+      - name: Run NAPI smoke test
+        run: cd crates/napi && npm test
+
+      - name: Check for uncommitted changes
+        run: git diff --exit-code
+
+  doc:
+    name: Documentation
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/setup-rust
+      - name: Check documentation
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps --document-private-items
+
+  typos:
+    name: Typos
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: crate-ci/typos@5374cbf686e897b15713110e233094e2874de7ef # v1
+
+  npm-package:
+    name: npm Package
+    needs: changes
+    if: needs.changes.outputs.npm-package == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      - name: Validate bundled Agent Skill
+        run: npx --yes @tanstack/intent@0.0.29 validate npm/fallow/skills
+
+      - name: Check npm package contents
+        run: |
+          cp schema.json npm/fallow/schema.json
+          # Document the cp invariant: npm/fallow/schema.json is the root
+          # schema.json verbatim. A future refactor that drops or moves the
+          # cp will fail loud here instead of silently shipping a stale
+          # schema to npm consumers. Refs #440.
+          diff schema.json npm/fallow/schema.json
+          npm pack --dry-run --json ./npm/fallow > /tmp/fallow-pack.json
+          node <<'NODE'
+          const fs = require('fs');
+          const [pack] = JSON.parse(fs.readFileSync('/tmp/fallow-pack.json', 'utf8'));
+          const files = new Set(pack.files.map((file) => file.path));
+          const required = [
+            'package.json',
+            'README.md',
+            'skills/fallow/SKILL.md',
+            'skills/fallow/references/cli-reference.md',
+            'skills/fallow/references/gotchas.md',
+            'skills/fallow/references/patterns.md',
+            'schema.json',
+          ];
+          const missing = required.filter((file) => !files.has(file));
+          if (missing.length > 0) {
+            throw new Error(`npm package is missing expected files: ${missing.join(', ')}`);
+          }
+          NODE
+
+  vscode:
+    name: VS Code Extension
+    needs: changes
+    if: needs.changes.outputs.vscode == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - run: cd editors/vscode && pnpm install --frozen-lockfile
+      - run: cd editors/vscode && pnpm audit --prod
+      - name: Verify generated TypeScript matches docs/output-schema.json
+        run: cd editors/vscode && pnpm run check:codegen
+      - run: cd editors/vscode && pnpm lint
+      - run: cd editors/vscode && pnpm build
+      - run: cd editors/vscode && pnpm test:unit
+      - run: cd editors/vscode && pnpm package
+
+  zed:
+    name: Zed Extension (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.zed == 'true' || github.event_name == 'push'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # PR runs ubuntu only (fast feedback, free for public repos).
+        # Push to main runs the full matrix as a pre-release safety net.
+        # macOS minutes are 10x quota multiplier on GitHub Free org plans;
+        # Windows is 2x. The April 2026 quota overshoot was driven by this
+        # matrix running on every PR push.
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: rustfmt
+          targets: wasm32-wasip2
+      - name: Run tests
+        run: cargo test --manifest-path editors/zed/Cargo.toml
+      - name: Build wasm extension
+        run: cargo build --target wasm32-wasip2 --manifest-path editors/zed/Cargo.toml
+      - name: Format
+        run: cargo fmt --check --manifest-path editors/zed/Cargo.toml
+
+  windows-arm64:
+    name: Windows ARM64 Native Compile
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.npm == 'true' || needs.changes.outputs.actions == 'true' || github.event_name == 'push'
+    runs-on: windows-11-arm
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/setup-rust
+        with:
+          targets: aarch64-pc-windows-msvc
+          cache-key: windows-arm64
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+      - name: Check Windows ARM64 compilation
+        run: cargo check -p fallow-cli -p fallow-lsp -p fallow-mcp -p fallow-node --target aarch64-pc-windows-msvc
+      - name: Build NAPI addon for Windows ARM64
+        run: |
+          cd crates/napi
+          npm ci --omit=optional
+          npx napi build --platform --release --target aarch64-pc-windows-msvc
+
+  test-gitlab-ci:
+    name: Test GitLab CI scripts
+    needs: changes
+    if: needs.changes.outputs.ci-scripts == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run GitLab CI jq unit tests
+        run: bash ci/tests/run.sh
+
+  audit:
+    name: Security Audit
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: taiki-e/install-action@9b29ffac42f36c4efe76140737435c61cfb92383 # cargo-audit
+      - run: cargo audit
+
+  deny:
+    name: Cargo Deny
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: EmbarkStudios/cargo-deny-action@6c8f9facfa5047ec02d8485b6bf52b587b7777d1 # v2
+
+  shear:
+    name: Unused Dependencies
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: taiki-e/install-action@b9da40722b5dc25d162879fdf6a098f2d71926cc # cargo-shear
+      - run: cargo shear
+
+  zizmor:
+    name: Actions Security
+    needs: changes
+    if: needs.changes.outputs.actions == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: false
+      # Scope to repo's own workflows + composite action. tests/fixtures/ contains
+      # intentionally lax CI YAML used as fallow analysis fixtures, not real workflows.
+      - run: uvx zizmor --config .github/zizmor.yml --min-confidence medium --format plain .github/ action.yml
+
+  msrv:
+    name: MSRV (1.92)
+    needs: changes
+    # Temporarily disabled to conserve CI minutes; run `cargo +1.92.0 check --workspace` locally.
+    if: false && (needs.changes.outputs.rust == 'true' || github.event_name == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: '1.92.0'
+          cache-key: msrv
+      - name: Check compilation
+        run: cargo check --workspace
+
+  miri:
+    name: Miri
+    needs: changes
+    # PR-only and path-filtered to crates/{graph,extract,types,config}: catches contributor PRs
+    # that add tempdir / fs-IO tests without inheriting #[cfg_attr(miri, ignore)] from sibling
+    # tests. Does not run on push events (the .githooks/pre-push hook covers that locally for
+    # maintainers who opt in via `git config core.hooksPath .githooks`).
+    if: needs.changes.outputs.miri == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      MIRI_TOOLCHAIN: nightly-2026-03-20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Miri toolchain
+        run: |
+          rustup toolchain install "$MIRI_TOOLCHAIN" --component miri
+          cargo +"$MIRI_TOOLCHAIN" miri setup
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: miri
+
+      - name: fallow-types
+        run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-types --lib --tests
+
+      - name: fallow-graph
+        run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests -- --skip proptests
+
+      # Only suppress, css, and visitor/helpers run under Miri (pure data logic).
+      # Parser-heavy modules (visitor::tests, sfc_template, html, template_usage)
+      # have no unsafe code and are too slow under Miri interpretation.
+      - name: fallow-extract
+        run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests -- --skip cache --skip visitor::tests --skip sfc_template --skip html --skip template_usage
+
+  ci-ok:
+    name: CI
+    if: always()
+    needs: [check, doc, typos, vscode, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: All checks passed
+        run: |
+          results='${{ toJSON(needs.*.result) }}'
+          for result in $(echo "$results" | jq -r '.[]'); do
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              echo "::error::Job failed with result: $result"
+              exit 1
+            fi
+          done

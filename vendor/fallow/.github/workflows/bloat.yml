@@ -1,0 +1,88 @@
+name: Binary Size
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/bloat.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/bloat.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: bloat-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep debug info for cargo-bloat function name resolution
+  CARGO_PROFILE_RELEASE_STRIP: "none"
+  CARGO_PROFILE_RELEASE_DEBUG: "2"
+
+jobs:
+  bloat:
+    name: Binary size tracking
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: bloat
+
+      - name: Install cargo-bloat
+        run: cargo install cargo-bloat --locked
+
+      - name: Report top functions by size
+        run: |
+          {
+            echo "## Top 20 functions by size"
+            echo '```'
+            cargo bloat --release -p fallow-cli -n 20
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report top crates by size
+        run: |
+          {
+            echo "## Top 20 crates by size"
+            echo '```'
+            cargo bloat --release -p fallow-cli --crates -n 20
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Track total binary size
+        run: |
+          SIZE=$(stat -c%s target/release/fallow)
+          SIZE="$SIZE" python3 -c "
+          import json, os
+          data = [{'name': 'Binary Size (fallow)', 'unit': 'bytes', 'value': int(os.environ['SIZE'])}]
+          print(json.dumps(data, indent=2))
+          " > bloat-bench.json
+
+      - name: Store binary size metric
+        uses: ./.github/actions/store-benchmark
+        with:
+          name: Fallow Binary Size
+          tool: customSmallerIsBetter
+          output-file-path: bloat-bench.json
+          data-dir: bloat
+          alert-threshold: '120%'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          continue-on-error: ${{ github.event_name == 'pull_request' }}

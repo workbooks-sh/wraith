@@ -1,0 +1,5 @@
+{
+  "name": "tsconfig-broken-path-alias-app",
+  "private": true,
+  "main": "src/index.ts"
+}

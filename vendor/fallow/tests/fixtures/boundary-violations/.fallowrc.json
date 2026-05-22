@@ -1,0 +1,14 @@
+{
+  "entry": ["src/ui/App.ts"],
+  "boundaries": {
+    "zones": [
+      { "name": "ui", "patterns": ["src/ui/**"] },
+      { "name": "db", "patterns": ["src/db/**"] },
+      { "name": "shared", "patterns": ["src/shared/**"] }
+    ],
+    "rules": [
+      { "from": "ui", "allow": ["shared"] },
+      { "from": "db", "allow": ["shared"] }
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "issue-311-vi-mock-factory-target",
+  "private": true,
+  "devDependencies": {
+    "vitest": "^4.1.5"
+  }
+}

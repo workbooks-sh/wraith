@@ -1,0 +1,4 @@
+{
+  "name": "issue-269-namespace-object-alias",
+  "main": "src/ad-engine-queries.ts"
+}

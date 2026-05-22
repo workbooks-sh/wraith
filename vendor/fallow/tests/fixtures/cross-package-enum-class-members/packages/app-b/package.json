@@ -1,0 +1,9 @@
+{
+  "name": "@repro/app-b",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "@repro/lib-a": "1.0.0"
+  }
+}

@@ -1,0 +1,78 @@
+---
+source: crates/cli/src/coverage/mod.rs
+expression: payload
+---
+schema_version: "1"
+framework_detected: plain_node
+package_manager: pnpm
+runtime_targets:
+  - node
+  - browser
+members:
+  - name: "@demo/api"
+    path: "."
+    framework_detected: plain_node
+    package_manager: pnpm
+    runtime_targets:
+      - node
+    files_to_edit:
+      - path: src/index.ts
+        reason: Start the Node runtime beacon before application code handles traffic.
+    snippets:
+      - label: Node entrypoint
+        path: src/index.ts
+        content: "import { createNodeBeacon } from \"@fallow-cli/beacon\";\n\nconst fallowBeacon = createNodeBeacon({\n  apiKey: process.env.FALLOW_API_KEY,\n  projectId: process.env.FALLOW_PROJECT_ID ?? \"my-app\",\n  endpoint: process.env.FALLOW_API_URL ?? \"https://api.fallow.cloud\",\n  transport: process.env.FALLOW_TRANSPORT === \"fs\" ? \"fs\" : \"http\",\n  writeToDir: process.env.FALLOW_WRITE_TO_DIR,\n});\n\nfallowBeacon.start();\n"
+    dockerfile_snippet: "ENV FALLOW_TRANSPORT=fs\nENV FALLOW_WRITE_TO_DIR=/tmp/fallow-coverage"
+    warnings:
+      - No local coverage artifact was detected yet.
+  - name: "@demo/admin"
+    path: apps/admin
+    framework_detected: vite
+    package_manager: pnpm
+    runtime_targets:
+      - browser
+    files_to_edit:
+      - path: apps/admin/src/main.ts
+        reason: Start the browser runtime beacon from the client entry module.
+    snippets:
+      - label: Vite browser entry
+        path: apps/admin/src/main.ts
+        content: "import { createBrowserBeacon } from \"@fallow-cli/beacon/browser\";\n\nconst fallowBeacon = createBrowserBeacon({\n  apiKey: import.meta.env.VITE_FALLOW_API_KEY,\n  projectId: import.meta.env.VITE_FALLOW_PROJECT_ID ?? \"my-app\",\n  endpoint: import.meta.env.VITE_FALLOW_API_URL ?? \"https://api.fallow.cloud\",\n  sampleRate: 0.01,\n});\n\nfallowBeacon.start();\n"
+    dockerfile_snippet: ~
+    warnings:
+      - No local coverage artifact was detected yet.
+  - name: "@demo/marketing"
+    path: apps/marketing
+    framework_detected: vite
+    package_manager: pnpm
+    runtime_targets:
+      - browser
+    files_to_edit:
+      - path: apps/marketing/src/main.ts
+        reason: Start the browser runtime beacon from the client entry module.
+    snippets:
+      - label: Vite browser entry
+        path: apps/marketing/src/main.ts
+        content: "import { createBrowserBeacon } from \"@fallow-cli/beacon/browser\";\n\nconst fallowBeacon = createBrowserBeacon({\n  apiKey: import.meta.env.VITE_FALLOW_API_KEY,\n  projectId: import.meta.env.VITE_FALLOW_PROJECT_ID ?? \"my-app\",\n  endpoint: import.meta.env.VITE_FALLOW_API_URL ?? \"https://api.fallow.cloud\",\n  sampleRate: 0.01,\n});\n\nfallowBeacon.start();\n"
+    dockerfile_snippet: ~
+    warnings:
+      - No local coverage artifact was detected yet.
+config_written: ~
+commands:
+  - pnpm add @fallow-cli/beacon
+  - pnpm add -D @fallow-cli/fallow-cov
+files_to_edit:
+  - path: src/index.ts
+    reason: Start the Node runtime beacon before application code handles traffic.
+snippets:
+  - label: Node entrypoint
+    path: src/index.ts
+    content: "import { createNodeBeacon } from \"@fallow-cli/beacon\";\n\nconst fallowBeacon = createNodeBeacon({\n  apiKey: process.env.FALLOW_API_KEY,\n  projectId: process.env.FALLOW_PROJECT_ID ?? \"my-app\",\n  endpoint: process.env.FALLOW_API_URL ?? \"https://api.fallow.cloud\",\n  transport: process.env.FALLOW_TRANSPORT === \"fs\" ? \"fs\" : \"http\",\n  writeToDir: process.env.FALLOW_WRITE_TO_DIR,\n});\n\nfallowBeacon.start();\n"
+dockerfile_snippet: "ENV FALLOW_TRANSPORT=fs\nENV FALLOW_WRITE_TO_DIR=/tmp/fallow-coverage"
+next_steps:
+  - Add the snippets to your application.
+  - Deploy with the beacon enabled.
+  - Run fallow health --runtime-coverage ./coverage --format json after collecting a local capture.
+  - Set FALLOW_API_KEY in CI before running fallow coverage upload-inventory.
+warnings:
+  - No local coverage artifact was detected yet.

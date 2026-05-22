@@ -1,0 +1,40 @@
+{
+  "total_issues": 7,
+  "unused_files": [],
+  "unused_exports": [
+    {
+      "path": "src/utils/date.ts",
+      "export_name": "formatRelative"
+    },
+    {
+      "path": "src/utils/index.ts",
+      "export_name": "unusedFromBarrel",
+      "is_re_export": true
+    },
+    {
+      "path": "src/utils/index.ts",
+      "export_name": "deepClone",
+      "is_re_export": true
+    },
+    {
+      "path": "src/utils/numbers.ts",
+      "export_name": "unusedFromBarrel"
+    },
+    {
+      "path": "src/utils/numbers.ts",
+      "export_name": "purelyInternal"
+    },
+    {
+      "path": "src/utils/objects.ts",
+      "export_name": "deepClone"
+    },
+    {
+      "path": "src/utils/objects.ts",
+      "export_name": "shallowMerge"
+    }
+  ],
+  "unused_types": [],
+  "unused_dependencies": [],
+  "unresolved_imports": [],
+  "circular_dependencies": []
+}

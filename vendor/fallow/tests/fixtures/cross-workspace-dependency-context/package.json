@@ -1,0 +1,5 @@
+{
+  "name": "cross-workspace-dependency-context",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

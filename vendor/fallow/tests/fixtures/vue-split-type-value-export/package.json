@@ -1,0 +1,7 @@
+{
+  "name": "vue-split-type-value-export",
+  "main": "src/main.ts",
+  "dependencies": {
+    "vue": "^3.0.0"
+  }
+}

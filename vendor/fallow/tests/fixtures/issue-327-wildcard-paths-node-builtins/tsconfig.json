@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "module": "preserve",
+    "paths": {
+      "*": ["./src/*"]
+    },
+    "types": ["node"]
+  }
+}

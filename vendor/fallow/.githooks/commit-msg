@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if [ ! -x node_modules/.bin/commitlint ]; then
+  echo "commitlint is not installed. Run: npm install"
+  exit 1
+fi
+
+node_modules/.bin/commitlint --edit "$1"

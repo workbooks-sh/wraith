@@ -1,0 +1,1 @@
+{"name": "mdx-project", "main": "src/index.ts", "dependencies": {"@mdx-js/react": "^3.0.0"}}

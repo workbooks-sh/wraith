@@ -1,0 +1,5 @@
+{
+  "name": "cross-package-enum-class-members",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

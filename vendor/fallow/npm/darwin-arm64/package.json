@@ -1,0 +1,24 @@
+{
+  "name": "@fallow-cli/darwin-arm64",
+  "version": "2.77.0",
+  "description": "Fallow CLI binary for macOS ARM64 (Apple Silicon)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fallow-rs/fallow.git"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "fallow",
+    "fallow.sig",
+    "fallow-lsp",
+    "fallow-lsp.sig",
+    "fallow-mcp",
+    "fallow-mcp.sig"
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "name": "ignore-exports-used-in-file",
+  "main": "src/index.ts",
+  "dependencies": {}
+}

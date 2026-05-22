@@ -1,0 +1,13 @@
+{
+  "name": "issue-303-namespace-object-alias-star-barrel",
+  "private": true,
+  "exports": {
+    ".": "./consumer.ts"
+  },
+  "workspaces": [
+    "api"
+  ],
+  "dependencies": {
+    "@foo/bar": "workspace:*"
+  }
+}

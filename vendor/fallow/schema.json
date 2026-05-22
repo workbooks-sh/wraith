@@ -1,0 +1,1758 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FallowConfig",
+  "description": "User-facing configuration loaded from `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.\n\n# Examples\n\n```\nuse fallow_config::FallowConfig;\n\n// Default config has sensible defaults\nlet config = FallowConfig::default();\nassert!(config.entry.is_empty());\nassert!(!config.production);\n\n// Deserialize from JSON\nlet config: FallowConfig = serde_json::from_str(r#\"{\n    \"entry\": [\"src/main.ts\"],\n    \"production\": true\n}\"#).unwrap();\nassert_eq!(config.entry, vec![\"src/main.ts\"]);\nassert!(config.production);\n```",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "JSON Schema reference (ignored during deserialization).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "writeOnly": true
+    },
+    "extends": {
+      "description": "Base config files to extend from.\n\nSupports three resolution strategies:\n- **Relative paths**: `\"./base.json\"` — resolved relative to the config file.\n- **npm packages**: `\"npm:@co/config\"` — resolved by walking up `node_modules/`.\n  Package resolution checks `package.json` `exports`/`main` first, then falls back\n  to standard config file names. Subpaths are supported (e.g., `npm:@co/config/strict.json`).\n- **HTTPS URLs**: `\"https://example.com/fallow-base.json\"` — fetched remotely.\n  Only HTTPS is supported (no plain HTTP). URL-sourced configs may extend other\n  URLs or `npm:` packages, but not relative paths. Only JSON/JSONC format is\n  supported for remote configs. Timeout is configurable via\n  `FALLOW_EXTENDS_TIMEOUT_SECS` (default: 5s).\n\nBase configs are loaded first, then this config's values override them.\nLater entries in the array override earlier ones.\n\n**Note:** `npm:` resolution uses `node_modules/` directory walk-up and is\nincompatible with Yarn Plug'n'Play (PnP), which has no `node_modules/`.\nURL extends fetch on every run (no caching). For reliable CI, prefer `npm:`\nfor private or critical configs.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "writeOnly": true
+    },
+    "entry": {
+      "description": "Additional entry point glob patterns.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "ignorePatterns": {
+      "description": "Glob patterns to ignore from analysis.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "framework": {
+      "description": "Custom framework definitions (inline plugin definitions).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ExternalPluginDef"
+      },
+      "default": []
+    },
+    "workspaces": {
+      "description": "Workspace overrides.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkspaceConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "ignoreDependencies": {
+      "description": "Dependencies to ignore (always considered used and always considered available).\n\nListed dependencies are excluded from both unused dependency and unlisted\ndependency detection. Useful for runtime-provided packages like `bun:sqlite`\nor implicitly available dependencies.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "ignoreExports": {
+      "description": "Export ignore rules.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/IgnoreExportRule"
+      },
+      "default": []
+    },
+    "ignoreCatalogReferences": {
+      "description": "Rules for suppressing `unresolved-catalog-reference` findings.\n\nEach rule matches by package name, optionally scoped to a specific\ncatalog and/or consumer `package.json` glob. Useful for staged catalog\nmigrations where the catalog edit lands separately from the consumer\nedit, and for library-internal placeholder packages whose target\ncatalog isn't ready yet.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/IgnoreCatalogReferenceRule"
+      }
+    },
+    "ignoreDependencyOverrides": {
+      "description": "Rules for suppressing `unused-dependency-override` and\n`misconfigured-dependency-override` findings.\n\nEach rule matches by override target package, optionally scoped to the\ndeclaring source file (`pnpm-workspace.yaml` or `package.json`). Useful\nfor overrides targeting purely-transitive packages (CVE-fix pattern)\nwhere the conservative static algorithm would otherwise cry wolf.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/IgnoreDependencyOverrideRule"
+      }
+    },
+    "ignoreExportsUsedInFile": {
+      "description": "Suppress unused-export findings when the exported symbol is referenced\ninside the file that declares it. This mirrors Knip's\n`ignoreExportsUsedInFile` option while still reporting exports that have\nno references at all.",
+      "$ref": "#/$defs/IgnoreExportsUsedInFileConfig",
+      "default": false
+    },
+    "ignoreDecorators": {
+      "description": "Decorators that fallow should NOT treat as evidence of reflective use.\nMembers carrying only these decorators are checked for usage as if they\nwere undecorated. Members carrying any decorator NOT in this list stay\nskipped (frameworks like NestJS, Angular, TypeORM rely on reflection so\nthe conservative default is to keep skipping).\n\nMatching rule: entries containing `.` (e.g. `\"decorators.log\"`) match\nthe full dotted path of a decorator. Bare entries (e.g. `\"step\"` or\n`\"decorators\"`) match the leftmost segment; a bare `\"decorators\"` entry\nthus collapses every `@decorators.*` decorator. Both `\"@step\"` and\n`\"step\"` round-trip equivalently (a leading `@` is stripped before\nmatching).\n\nEntries that never match a decorator in the analyzed codebase produce\na one-time warning at end of run, mirroring the existing\n`usedClassMembers` warn-on-unmatched-pattern behavior. See issue #471.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "usedClassMembers": {
+      "description": "Class member method/property rules that should never be flagged as\nunused. Supports plain member names for global suppression and scoped\nobjects with `extends` / `implements` constraints for framework-invoked\nmethods that should only be suppressed on matching classes.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/UsedClassMemberRule"
+      },
+      "default": []
+    },
+    "duplicates": {
+      "description": "Duplication detection settings.",
+      "$ref": "#/$defs/DuplicatesConfig",
+      "default": {
+        "enabled": true,
+        "mode": "mild",
+        "minTokens": 50,
+        "minLines": 5,
+        "minOccurrences": 2,
+        "threshold": 0.0,
+        "ignore": [],
+        "ignoreDefaults": true,
+        "skipLocal": false,
+        "crossLanguage": false,
+        "ignoreImports": false,
+        "normalization": {},
+        "minCorpusSizeForShingleFilter": 1024,
+        "minCorpusSizeForTokenCache": 5000
+      }
+    },
+    "health": {
+      "description": "Complexity health metrics settings.",
+      "$ref": "#/$defs/HealthConfig",
+      "default": {
+        "maxCyclomatic": 20,
+        "maxCognitive": 15,
+        "maxCrap": 30.0,
+        "ignore": [],
+        "ownership": {
+          "botPatterns": [
+            "*\\[bot\\]*",
+            "dependabot*",
+            "renovate*",
+            "github-actions*",
+            "svc-*",
+            "*-service-account*"
+          ],
+          "emailMode": "handle"
+        },
+        "suggestInlineSuppression": true
+      }
+    },
+    "rules": {
+      "description": "Per-issue-type severity rules.",
+      "$ref": "#/$defs/RulesConfig",
+      "default": {
+        "unused-files": "error",
+        "unused-exports": "error",
+        "unused-types": "error",
+        "private-type-leaks": "off",
+        "unused-dependencies": "error",
+        "unused-dev-dependencies": "warn",
+        "unused-optional-dependencies": "warn",
+        "unused-enum-members": "error",
+        "unused-class-members": "error",
+        "unresolved-imports": "error",
+        "unlisted-dependencies": "error",
+        "duplicate-exports": "error",
+        "type-only-dependencies": "warn",
+        "test-only-dependencies": "warn",
+        "circular-dependencies": "error",
+        "re-export-cycle": "warn",
+        "boundary-violation": "error",
+        "coverage-gaps": "off",
+        "feature-flags": "off",
+        "stale-suppressions": "warn",
+        "unused-catalog-entries": "warn",
+        "empty-catalog-groups": "warn",
+        "unresolved-catalog-references": "error",
+        "unused-dependency-overrides": "warn",
+        "misconfigured-dependency-overrides": "error"
+      }
+    },
+    "boundaries": {
+      "description": "Architecture boundary enforcement configuration.",
+      "$ref": "#/$defs/BoundaryConfig",
+      "default": {
+        "zones": [],
+        "rules": []
+      }
+    },
+    "flags": {
+      "description": "Feature flag detection configuration.",
+      "$ref": "#/$defs/FlagsConfig",
+      "default": {
+        "configObjectHeuristics": false
+      }
+    },
+    "fix": {
+      "description": "Auto-fix behavior settings.",
+      "$ref": "#/$defs/FixConfig",
+      "default": {
+        "catalog": {
+          "deletePrecedingComments": "auto"
+        }
+      }
+    },
+    "resolve": {
+      "description": "Module resolver configuration (custom conditions, etc.).",
+      "$ref": "#/$defs/ResolveConfig",
+      "default": {}
+    },
+    "production": {
+      "description": "Production mode: exclude test/dev files, only start/build scripts.\n\nAccepts the legacy boolean form (`true` applies to all analyses) or a\nper-analysis object (`{ \"deadCode\": false, \"health\": true, \"dupes\": false }`).",
+      "$ref": "#/$defs/ProductionConfig",
+      "default": false
+    },
+    "plugins": {
+      "description": "Paths to external plugin files or directories containing plugin files.\n\nSupports TOML, JSON, and JSONC formats.\n\nIn addition to these explicit paths, fallow automatically discovers:\n- `*.toml`, `*.json`, `*.jsonc` files in `.fallow/plugins/`\n- `fallow-plugin-*.{toml,json,jsonc}` files in the project root",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "dynamicallyLoaded": {
+      "description": "Glob patterns for files that are dynamically loaded at runtime\n(plugin directories, locale files, etc.). These files are treated as\nalways-used and will never be flagged as unused.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "overrides": {
+      "description": "Per-file rule overrides matching oxlint's overrides pattern.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ConfigOverride"
+      },
+      "default": []
+    },
+    "codeowners": {
+      "description": "Path to a CODEOWNERS file for `--group-by owner`.\n\nWhen unset, fallow auto-probes `CODEOWNERS`, `.github/CODEOWNERS`,\n`.gitlab/CODEOWNERS`, and `docs/CODEOWNERS`. Set this to use a\nnon-standard location.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "publicPackages": {
+      "description": "Workspace package name patterns that are public libraries.\nExported API surface from these packages is not flagged as unused.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "regression": {
+      "description": "Regression detection baseline embedded in config.\nStores issue counts from a known-good state for CI regression checks.\nPopulated by `--save-regression-baseline` (no path), read by `--fail-on-regression`.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RegressionConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "audit": {
+      "description": "Audit command baseline paths (one per analysis: dead-code, health, dupes).\n\n`fallow audit` runs three analyses and each has its own baseline format.\nPaths in this section are resolved relative to the project root. CLI flags\n(`--dead-code-baseline`, `--health-baseline`, `--dupes-baseline`) override\nthese values when provided.",
+      "$ref": "#/$defs/AuditConfig"
+    },
+    "sealed": {
+      "description": "Mark this config as sealed: `extends` paths must be file-relative and\nresolve within this config's own directory. `npm:` and `https:` extends\nare rejected. Useful for library publishers and monorepo sub-packages\nthat want to guarantee their config is self-contained and not subject\nto ancestor configs being injected via `extends`.\n\nDiscovery is unaffected (first-match-wins already stops the directory\nwalk at the nearest config). This only constrains `extends`.",
+      "type": "boolean",
+      "default": false
+    },
+    "includeEntryExports": {
+      "description": "Report unused exports in entry files instead of auto-marking them as\nused. Catches typos in framework exports (e.g. `meatdata` instead of\n`metadata`). The CLI flag `--include-entry-exports` (global) overrides\nthis when set; otherwise the config value is used.",
+      "type": "boolean",
+      "default": false
+    },
+    "cache": {
+      "description": "Incremental cache tuning. Today the only knob is `maxSizeMb`, which\ncaps the on-disk cache and triggers LRU eviction during save. See\n[`CacheConfig`].",
+      "$ref": "#/$defs/CacheConfig"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "ExternalPluginDef": {
+      "description": "A declarative plugin definition loaded from a standalone file or inline config.\n\nExternal plugins provide the same static pattern capabilities as built-in\nplugins (entry points, always-used files, used exports, tooling dependencies),\nbut are defined in standalone files or inline in the fallow config rather than\ncompiled Rust code.\n\nThey cannot do AST-based config parsing (`resolve_config()`), but cover the\nvast majority of framework integration use cases.\n\nSupports JSONC, JSON, and TOML formats. All use camelCase field names.\n\n```json\n{\n  \"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json\",\n  \"name\": \"my-framework\",\n  \"enablers\": [\"my-framework\", \"@my-framework/core\"],\n  \"entryPoints\": [\"src/routes/**/*.{ts,tsx}\"],\n  \"configPatterns\": [\"my-framework.config.{ts,js}\"],\n  \"alwaysUsed\": [\"src/setup.ts\"],\n  \"toolingDependencies\": [\"my-framework-cli\"],\n  \"usedExports\": [\n    { \"pattern\": \"src/routes/**/*.{ts,tsx}\", \"exports\": [\"default\", \"loader\", \"action\"] }\n  ]\n}\n```",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Unique name for this plugin.",
+          "type": "string"
+        },
+        "detection": {
+          "description": "Rich detection logic (dependency checks, file existence, boolean combinators).\nTakes priority over `enablers` when set.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginDetection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "enablers": {
+          "description": "Package names that activate this plugin when found in package.json.\nSupports exact matches and prefix patterns (ending with `/`).\nOnly used when `detection` is not set.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "entryPoints": {
+          "description": "Glob patterns for entry point files.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "entryPointRole": {
+          "description": "Coverage role for `entryPoints`.\n\nDefaults to `support`. Set to `runtime` for application entry points\nor `test` for test framework entry points.",
+          "$ref": "#/$defs/EntryPointRole",
+          "default": "support"
+        },
+        "configPatterns": {
+          "description": "Glob patterns for config files (marked as always-used when active).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "alwaysUsed": {
+          "description": "Files that are always considered \"used\" when this plugin is active.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "toolingDependencies": {
+          "description": "Dependencies that are tooling (used via CLI/config, not source imports).\nThese should not be flagged as unused devDependencies.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "usedExports": {
+          "description": "Exports that are always considered used for matching file patterns.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExternalUsedExport"
+          },
+          "default": []
+        },
+        "usedClassMembers": {
+          "description": "Class member method/property rules the framework invokes at runtime.\nSupports plain member names for global suppression and scoped objects\nwith `extends` / `implements` constraints when the method name is too\ncommon to suppress across the whole workspace.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UsedClassMemberRule"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "PluginDetection": {
+      "description": "How to detect if a plugin should be activated.\n\nWhen set on an `ExternalPluginDef`, this takes priority over `enablers`.\nSupports dependency checks, file existence checks, and boolean combinators.",
+      "oneOf": [
+        {
+          "description": "Plugin detected if this package is in dependencies.",
+          "type": "object",
+          "properties": {
+            "package": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "dependency"
+            }
+          },
+          "required": [
+            "type",
+            "package"
+          ]
+        },
+        {
+          "description": "Plugin detected if this file pattern matches.",
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "fileExists"
+            }
+          },
+          "required": [
+            "type",
+            "pattern"
+          ]
+        },
+        {
+          "description": "All conditions must be true.",
+          "type": "object",
+          "properties": {
+            "conditions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PluginDetection"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "required": [
+            "type",
+            "conditions"
+          ]
+        },
+        {
+          "description": "Any condition must be true.",
+          "type": "object",
+          "properties": {
+            "conditions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PluginDetection"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "any"
+            }
+          },
+          "required": [
+            "type",
+            "conditions"
+          ]
+        }
+      ]
+    },
+    "EntryPointRole": {
+      "description": "How a plugin's discovered entry points contribute to coverage reachability.",
+      "oneOf": [
+        {
+          "description": "Runtime/application roots that should count toward runtime reachability.",
+          "type": "string",
+          "const": "runtime"
+        },
+        {
+          "description": "Test roots that should count toward test reachability.",
+          "type": "string",
+          "const": "test"
+        },
+        {
+          "description": "Support/setup/config roots that should keep files alive but not count as runtime/test.",
+          "type": "string",
+          "const": "support"
+        }
+      ]
+    },
+    "ExternalUsedExport": {
+      "description": "Exports considered used for files matching a pattern.",
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "description": "Glob pattern for files.",
+          "type": "string"
+        },
+        "exports": {
+          "description": "Export names always considered used.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "pattern",
+        "exports"
+      ]
+    },
+    "UsedClassMemberRule": {
+      "description": "A `usedClassMembers` entry from config or an external plugin.\n\nSupports either a plain member name or glob pattern (`\"agInit\"`,\n`\"enter*\"`) or a scoped rule that only applies when a class matches\nspecific `extends` / `implements` heritage clauses.",
+      "anyOf": [
+        {
+          "description": "Globally suppress this class member name or glob pattern for all classes.",
+          "type": "string"
+        },
+        {
+          "description": "Suppress these class member names only for matching classes.",
+          "$ref": "#/$defs/ScopedUsedClassMemberRule"
+        }
+      ]
+    },
+    "ScopedUsedClassMemberRule": {
+      "description": "A heritage-constrained `usedClassMembers` rule.",
+      "type": "object",
+      "properties": {
+        "extends": {
+          "description": "Only apply when the class extends this parent class name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "implements": {
+          "description": "Only apply when the class implements this interface name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "members": {
+          "description": "Member names or glob patterns that should be treated as framework-used.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "members"
+      ]
+    },
+    "WorkspaceConfig": {
+      "description": "Workspace configuration for monorepo support.",
+      "type": "object",
+      "properties": {
+        "patterns": {
+          "description": "Additional workspace patterns (beyond what's in root package.json).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      }
+    },
+    "IgnoreExportRule": {
+      "description": "Rule for ignoring specific exports.",
+      "type": "object",
+      "properties": {
+        "file": {
+          "description": "Glob pattern for files.",
+          "type": "string"
+        },
+        "exports": {
+          "description": "Export names to ignore (`*` for all).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "file",
+        "exports"
+      ]
+    },
+    "IgnoreCatalogReferenceRule": {
+      "description": "Rule for suppressing an `unresolved-catalog-reference` finding.\n\nA finding is suppressed when ALL provided fields match the finding:\n- `package` matches the consumed package name exactly (case-sensitive).\n- `catalog`, if set, matches the referenced catalog name (`\"default\"` for\n  bare `catalog:` references; named catalogs use their declared key). When\n  omitted, any catalog matches.\n- `consumer`, if set, is a glob matched against the consumer `package.json`\n  path relative to the project root. When omitted, any consumer matches.\n\nTypical use cases:\n- Staged migrations: catalog entry is being added in a separate PR\n- Library-internal placeholder packages whose target catalog isn't ready yet",
+      "type": "object",
+      "properties": {
+        "package": {
+          "description": "Package name being referenced via the catalog protocol (exact match).",
+          "type": "string"
+        },
+        "catalog": {
+          "description": "Catalog name to scope the suppression to. `None` matches any catalog.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consumer": {
+          "description": "Glob (root-relative) for the consumer `package.json`. `None` matches any consumer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "package"
+      ]
+    },
+    "IgnoreDependencyOverrideRule": {
+      "description": "Rule for suppressing an `unused-dependency-override` or\n`misconfigured-dependency-override` finding.\n\nA finding is suppressed when ALL provided fields match the finding:\n- `package` matches the override's target package name exactly\n  (case-sensitive). For parent-chain overrides (`react>react-dom`), the\n  target is the rightmost segment (`react-dom`).\n- `source`, if set, scopes the suppression to overrides declared in that\n  source file. Accepts `\"pnpm-workspace.yaml\"` or `\"package.json\"`.\n  When omitted, both sources match.\n\nTypical use cases:\n- Library-internal CI tooling overrides we cannot drop yet\n- Overrides targeting purely-transitive packages (CVE-fix pattern)",
+      "type": "object",
+      "properties": {
+        "package": {
+          "description": "Override target package name (exact match; case-sensitive).",
+          "type": "string"
+        },
+        "source": {
+          "description": "Source file scope: `\"pnpm-workspace.yaml\"` or `\"package.json\"`.\n`None` matches both sources.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "package"
+      ]
+    },
+    "IgnoreExportsUsedInFileConfig": {
+      "description": "Controls whether exports referenced only inside their defining file are\nreported as unused exports.",
+      "anyOf": [
+        {
+          "description": "`true` suppresses both value and type exports that are referenced in\ntheir defining file. `false` preserves the default cross-file behavior.",
+          "type": "boolean"
+        },
+        {
+          "description": "Knip-compatible fine-grained form. Fallow groups type aliases and\ninterfaces under `unused_types`, so either field enables type-export\nsuppression for same-file references.",
+          "$ref": "#/$defs/IgnoreExportsUsedInFileByKind"
+        }
+      ]
+    },
+    "IgnoreExportsUsedInFileByKind": {
+      "description": "Knip-compatible `ignoreExportsUsedInFile` object form.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Suppress same-file references for exported type aliases.",
+          "type": "boolean",
+          "default": false
+        },
+        "interface": {
+          "description": "Suppress same-file references for exported interfaces.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "DuplicatesConfig": {
+      "description": "Configuration for code duplication detection.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Whether duplication detection is enabled.",
+          "type": "boolean",
+          "default": true
+        },
+        "mode": {
+          "description": "Detection mode: strict, mild, weak, or semantic.",
+          "$ref": "#/$defs/DetectionMode",
+          "default": "mild"
+        },
+        "minTokens": {
+          "description": "Minimum number of tokens for a clone.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 50
+        },
+        "minLines": {
+          "description": "Minimum number of lines for a clone.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 5
+        },
+        "minOccurrences": {
+          "description": "Minimum number of occurrences (instances of the same clone) before a\ngroup is reported. Defaults to 2 (every duplicated pair is reported).\nRaise this to focus on widespread copy-paste worth refactoring and skip\ncontext-sensitive pairs.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 2,
+          "default": 2
+        },
+        "threshold": {
+          "description": "Maximum allowed duplication percentage (0 = no limit).",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "ignore": {
+          "description": "Additional ignore patterns for duplication analysis.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "ignoreDefaults": {
+          "description": "Merge built-in generated-framework ignore patterns with `ignore`.\n\nSet to `false` to use only the user-provided `ignore` list.",
+          "type": "boolean",
+          "default": true
+        },
+        "skipLocal": {
+          "description": "Only report cross-directory duplicates.",
+          "type": "boolean",
+          "default": false
+        },
+        "crossLanguage": {
+          "description": "Enable cross-language clone detection by stripping type annotations.\n\nWhen enabled, TypeScript type annotations (parameter types, return types,\ngenerics, interfaces, type aliases) are stripped from the token stream,\nallowing detection of clones between `.ts` and `.js` files.",
+          "type": "boolean",
+          "default": false
+        },
+        "ignoreImports": {
+          "description": "Exclude ES `import` declarations from clone detection.\n\nWhen enabled, all `import` statements (value imports, type imports, and\nside-effect imports) are stripped from the token stream before clone\ndetection. This reduces noise from sorted import blocks that naturally\nlook similar across files. Only affects ES `import` declarations;\nCommonJS `require()` calls are not filtered.",
+          "type": "boolean",
+          "default": false
+        },
+        "normalization": {
+          "description": "Fine-grained normalization overrides on top of the detection mode.",
+          "$ref": "#/$defs/NormalizationConfig",
+          "default": {}
+        },
+        "minCorpusSizeForShingleFilter": {
+          "description": "Minimum tokenized file count before focused duplicate analysis prefilters\nunchanged files with k-token shingles.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 1024
+        },
+        "minCorpusSizeForTokenCache": {
+          "description": "Minimum source file count before the persistent duplication token cache\nactivates. Below this threshold the cache load/save overhead exceeds the\ntokenize savings, so the cache stays disabled even when not running with\n`--no-cache`.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 5000
+        }
+      }
+    },
+    "DetectionMode": {
+      "description": "Detection mode controlling how aggressively tokens are normalized.\n\nSince fallow uses AST-based tokenization (not lexer-based), whitespace and\ncomments are inherently absent from the token stream. The `Strict` and `Mild`\nmodes are currently equivalent. `Weak` mode additionally blinds string\nliterals. `Semantic` mode blinds all identifiers and literal values for\nType-2 (renamed variable) clone detection.",
+      "oneOf": [
+        {
+          "description": "All tokens preserved including identifier names and literal values (Type-1 only).",
+          "type": "string",
+          "const": "strict"
+        },
+        {
+          "description": "Default mode -- equivalent to strict for AST-based tokenization.",
+          "type": "string",
+          "const": "mild"
+        },
+        {
+          "description": "Blind string literal values (structure-preserving).",
+          "type": "string",
+          "const": "weak"
+        },
+        {
+          "description": "Blind all identifiers and literal values for structural (Type-2) detection.",
+          "type": "string",
+          "const": "semantic"
+        }
+      ]
+    },
+    "NormalizationConfig": {
+      "description": "Fine-grained normalization overrides.\n\nEach option, when set to `Some(true)`, forces that normalization regardless of\nthe detection mode. When set to `Some(false)`, it forces preservation. When\n`None`, the detection mode's default behavior applies.",
+      "type": "object",
+      "properties": {
+        "ignoreIdentifiers": {
+          "description": "Blind all identifiers (variable names, function names, etc.) to the same hash.\nDefault in `semantic` mode.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "ignoreStringValues": {
+          "description": "Blind string literal values to the same hash.\nDefault in `weak` and `semantic` modes.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "ignoreNumericValues": {
+          "description": "Blind numeric literal values to the same hash.\nDefault in `semantic` mode.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "HealthConfig": {
+      "description": "Configuration for complexity health metrics (`fallow health`).",
+      "type": "object",
+      "properties": {
+        "maxCyclomatic": {
+          "description": "Maximum allowed cyclomatic complexity per function (default: 20).\nFunctions exceeding this threshold are reported.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": 20
+        },
+        "maxCognitive": {
+          "description": "Maximum allowed cognitive complexity per function (default: 15).\nFunctions exceeding this threshold are reported.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": 15
+        },
+        "maxCrap": {
+          "description": "Maximum allowed CRAP (Change Risk Anti-Patterns) score per function\n(default: 30.0). CRAP combines cyclomatic complexity with test\ncoverage: high complexity plus low coverage produces a high CRAP\nscore. Functions meeting or exceeding this threshold are reported.\nUse `--coverage` with Istanbul data for accurate per-function CRAP;\notherwise fallow estimates coverage from the module graph.",
+          "type": "number",
+          "format": "double",
+          "default": 30.0
+        },
+        "ignore": {
+          "description": "Glob patterns to exclude from complexity analysis.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "ownership": {
+          "description": "Ownership analysis configuration. Controls bot filtering and email\nprivacy mode for `--ownership` output.",
+          "$ref": "#/$defs/OwnershipConfig",
+          "default": {
+            "botPatterns": [
+              "*\\[bot\\]*",
+              "dependabot*",
+              "renovate*",
+              "github-actions*",
+              "svc-*",
+              "*-service-account*"
+            ],
+            "emailMode": "handle"
+          }
+        },
+        "suggestInlineSuppression": {
+          "description": "Whether health JSON output emits `suppress-line` action hints\nalongside complexity findings (default: `true`). Set to `false` to\nopt out across the project: useful for teams that manage suppressions\nexclusively through `// fallow-ignore-*` comments authored by hand or\nthrough the `fallow.suppress` LSP code action, but who do not want\nCI-driven `suppress-line` action hints in their JSON output.\n`--baseline` activates auto-omission regardless of this setting,\nsince baseline files are a separate suppression mechanism.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "OwnershipConfig": {
+      "description": "Configuration for ownership analysis (`fallow health --hotspots --ownership`).",
+      "type": "object",
+      "properties": {
+        "botPatterns": {
+          "description": "Glob patterns (matched against the author email local-part) that\nidentify bot or service-account commits to exclude from ownership\nsignals. Overrides the defaults entirely when set.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "*\\[bot\\]*",
+            "dependabot*",
+            "renovate*",
+            "github-actions*",
+            "svc-*",
+            "*-service-account*"
+          ]
+        },
+        "emailMode": {
+          "description": "Privacy mode for emitted author emails. Defaults to `handle`.\nOverride on the CLI via `--ownership-emails=raw|handle|hash`.",
+          "$ref": "#/$defs/EmailMode",
+          "default": "handle"
+        }
+      }
+    },
+    "EmailMode": {
+      "description": "Privacy mode for author emails emitted in ownership output.\n\nDefaults to `handle` (local-part only, no domain) so SARIF and JSON\nartifacts do not leak raw email addresses into CI pipelines.",
+      "oneOf": [
+        {
+          "description": "Show the raw email address as it appears in git history.\nUse for public repositories where history is already exposed.",
+          "type": "string",
+          "const": "raw"
+        },
+        {
+          "description": "Show the local-part only (before the `@`). Mailmap-resolved where possible.\nDefault. Balances readability and privacy.",
+          "type": "string",
+          "const": "handle"
+        },
+        {
+          "description": "Show a stable `xxh3:<16hex>` pseudonym derived from the raw email.\nNon-cryptographic; suitable to keep raw emails out of CI artifacts\n(SARIF, code-scanning uploads) but not as a security primitive --\na known list of org emails can be brute-forced into a rainbow table.\nUse in regulated environments where even local-parts are sensitive.",
+          "type": "string",
+          "const": "hash"
+        }
+      ]
+    },
+    "RulesConfig": {
+      "description": "Per-issue-type severity configuration.\n\nControls which issue types cause CI failure, are reported as warnings,\nor are suppressed entirely. Most fields default to `Severity::Error`.\n\nRule names use kebab-case in config files (e.g., `\"unused-files\": \"error\"`).",
+      "type": "object",
+      "properties": {
+        "unused-files": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unused-exports": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unused-types": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "private-type-leaks": {
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
+        "unused-dependencies": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unused-dev-dependencies": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "unused-optional-dependencies": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "unused-enum-members": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unused-class-members": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unresolved-imports": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unlisted-dependencies": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "duplicate-exports": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "type-only-dependencies": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "test-only-dependencies": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "circular-dependencies": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "re-export-cycle": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "boundary-violation": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "coverage-gaps": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "feature-flags": {
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
+        "stale-suppressions": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "unused-catalog-entries": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "empty-catalog-groups": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "unresolved-catalog-references": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unused-dependency-overrides": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "misconfigured-dependency-overrides": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        }
+      }
+    },
+    "Severity": {
+      "description": "Severity level for rules.\n\nControls whether an issue type causes CI failure (`error`), is reported\nwithout failing (`warn`), or is suppressed entirely (`off`).",
+      "oneOf": [
+        {
+          "description": "Report and fail CI (non-zero exit code).",
+          "type": "string",
+          "const": "error"
+        },
+        {
+          "description": "Report but don't fail CI.",
+          "type": "string",
+          "const": "warn"
+        },
+        {
+          "description": "Don't detect or report.",
+          "type": "string",
+          "const": "off"
+        }
+      ]
+    },
+    "BoundaryConfig": {
+      "description": "Architecture boundary configuration.\n\nDefines zones (directory groupings) and rules (which zones may import from which).\nOptionally uses a built-in preset as a starting point.\n\n# Examples\n\n```\nuse fallow_config::BoundaryConfig;\n\nlet json = r#\"{\n    \"zones\": [\n        { \"name\": \"ui\", \"patterns\": [\"src/components/**\"] },\n        { \"name\": \"db\", \"patterns\": [\"src/db/**\"] }\n    ],\n    \"rules\": [\n        { \"from\": \"ui\", \"allow\": [\"db\"] }\n    ]\n}\"#;\nlet config: BoundaryConfig = serde_json::from_str(json).unwrap();\nassert_eq!(config.zones.len(), 2);\nassert_eq!(config.rules.len(), 1);\n```\n\nUsing a preset:\n\n```\nuse fallow_config::BoundaryConfig;\n\nlet json = r#\"{ \"preset\": \"layered\" }\"#;\nlet mut config: BoundaryConfig = serde_json::from_str(json).unwrap();\nconfig.expand(\"src\");\nassert_eq!(config.zones.len(), 4);\nassert_eq!(config.rules.len(), 4);\n```",
+      "type": "object",
+      "properties": {
+        "preset": {
+          "description": "Built-in architecture preset. When set, expands into default zones and rules.\nUser-defined zones and rules merge on top: zones with the same name replace\nthe preset zone; rules with the same `from` replace the preset rule.\nPreset patterns use `{rootDir}/{zone}/**` where rootDir is auto-detected\nfrom tsconfig.json (falls back to `src`).\nNote: preset patterns are flat (`src/<zone>/**`). For monorepos with\nper-package source directories, define zones explicitly instead.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundaryPreset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "zones": {
+          "description": "Named zones mapping directory patterns to architectural layers.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoundaryZone"
+          },
+          "default": []
+        },
+        "rules": {
+          "description": "Import rules between zones. A zone with a rule entry can only import\nfrom the listed zones (plus itself). A zone without a rule entry is unrestricted.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoundaryRule"
+          },
+          "default": []
+        }
+      }
+    },
+    "BoundaryPreset": {
+      "description": "Built-in architecture presets.\n\nEach preset expands into a set of zones and import rules for a common\narchitecture pattern. User-defined zones and rules merge on top of the\npreset defaults (zones with the same name replace the preset zone;\nrules with the same `from` replace the preset rule).\n\n# Examples\n\n```\nuse fallow_config::BoundaryPreset;\n\nlet preset: BoundaryPreset = serde_json::from_str(r#\"\"layered\"\"#).unwrap();\nassert!(matches!(preset, BoundaryPreset::Layered));\n```",
+      "oneOf": [
+        {
+          "description": "Classic layered architecture: presentation → application → domain ← infrastructure.\nInfrastructure may also import from application (common in DI frameworks).",
+          "type": "string",
+          "const": "layered"
+        },
+        {
+          "description": "Hexagonal / ports-and-adapters: adapters → ports → domain.",
+          "type": "string",
+          "const": "hexagonal"
+        },
+        {
+          "description": "Feature-Sliced Design: app > pages > widgets > features > entities > shared.\nEach layer may only import from layers below it.",
+          "type": "string",
+          "const": "feature-sliced"
+        },
+        {
+          "description": "Bulletproof React: app → features → shared + server.\nFeature modules are isolated from each other via `autoDiscover`: every\nimmediate child of `src/features/` becomes its own `features/<name>` zone,\nand cross-feature imports are reported as boundary violations.\nTop-level files in `src/features/` are classified by the logical\n`features` parent zone, so barrels can re-export child features while\nnon-barrel top-level files still obey the `features` boundary rule.",
+          "type": "string",
+          "const": "bulletproof"
+        }
+      ]
+    },
+    "BoundaryZone": {
+      "description": "A named zone grouping files by directory pattern.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Zone identifier referenced in rules (e.g., `\"ui\"`, `\"database\"`, `\"shared\"`).",
+          "type": "string"
+        },
+        "patterns": {
+          "description": "Glob patterns (relative to project root) that define zone membership.\nA file belongs to the first zone whose pattern matches.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "autoDiscover": {
+          "description": "Directories whose immediate child directories should become separate\nzones under this logical group.\n\nFor example, `{ \"name\": \"features\", \"autoDiscover\": [\"src/features\"] }`\ncreates zones such as `features/auth` and `features/billing`, each with\na pattern for its own subtree. Rules that reference `features` expand to\nevery discovered child zone. If `patterns` is also set, the parent zone\nremains as a fallback after discovered child zones.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "root": {
+          "description": "Optional subtree scope for monorepo per-package boundaries.\n\nWhen set, the zone's `patterns` are matched against paths *relative*\nto this directory rather than the project root. At classification\ntime, fallow checks that a candidate path starts with `root` and\nstrips that prefix before glob-matching the patterns against the\nremainder. Files outside the subtree never match the zone.\n\nUseful for monorepos where each package has the same internal\ndirectory layout: instead of writing `packages/app/src/**` and\n`packages/core/src/**` (which collide on shared zone names), set\n`root: \"packages/app/\"` and `patterns: [\"src/**\"]` per package.\n\nTrailing slash and leading `./` are normalized; backslashes are\nconverted to forward slashes. Patterns must NOT redundantly include\nthe root prefix: `root: \"packages/app/\"` with\n`patterns: [\"packages/app/src/**\"]` is rejected with\n`FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX` because patterns are\nresolved relative to the root.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "BoundaryRule": {
+      "description": "An import rule between zones.",
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "The zone this rule applies to (the importing side).",
+          "type": "string"
+        },
+        "allow": {
+          "description": "Zones that `from` is allowed to import from. Self-imports are always allowed.\nAn empty list means the zone may not import from any other zone.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "allowTypeOnly": {
+          "description": "Zones that `from` may type-only-import from even when not listed in\n`allow`. Mirrors the `allow` shape: a list of target zone names. A\ntype-only import declaration (`import type {...}`, `import type * as ns`,\nor a per-specifier inline `type` qualifier on every named specifier) to a\nlisted zone is not reported as a boundary violation. Mixed-specifier\nimports (`import { type Foo, Bar }`) that carry at least one value\nsymbol still fire because the runtime dependency on `Bar` is real.\nType-only re-exports (`export type { Foo } from \"...\"`) participate\nin the same allowance because they surface as edges flagged\n`is_type_only: true` and, like type-only imports, are erased at\ncompile time.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "from"
+      ]
+    },
+    "FlagsConfig": {
+      "description": "Feature flag detection configuration.\n\nControls which patterns fallow uses to detect feature flags in source code.\nConfigured via the `flags` section in `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.\n\n# Examples\n\n```json\n{\n  \"flags\": {\n    \"sdkPatterns\": [\n      { \"function\": \"useFlag\", \"nameArg\": 0, \"provider\": \"LaunchDarkly\" }\n    ],\n    \"envPrefixes\": [\"FEATURE_\", \"NEXT_PUBLIC_ENABLE_\"],\n    \"configObjectHeuristics\": false\n  }\n}\n```",
+      "type": "object",
+      "properties": {
+        "sdkPatterns": {
+          "description": "Additional SDK call patterns to detect as feature flags.\nThese are merged with the built-in patterns (LaunchDarkly, Statsig, Unleash, GrowthBook).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SdkPattern"
+          }
+        },
+        "envPrefixes": {
+          "description": "Environment variable prefixes that indicate feature flags.\nMerged with built-in prefixes. Only `process.env.*` accesses matching\nthese prefixes are reported as feature flags.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "configObjectHeuristics": {
+          "description": "Enable config object heuristic detection.\nWhen true, property accesses on objects whose name contains \"feature\",\n\"flag\", or \"toggle\" are reported as low-confidence feature flags.\nDefault: false (opt-in due to higher false positive rate).",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "SdkPattern": {
+      "description": "A custom SDK call pattern for feature flag detection.\n\nDescribes a function call that evaluates a feature flag, e.g.,\n`useFlag('new-checkout')` or `client.getFeatureValue('parser', false)`.",
+      "type": "object",
+      "properties": {
+        "function": {
+          "description": "Function name to match (e.g., `\"useFlag\"`, `\"variation\"`).",
+          "type": "string"
+        },
+        "nameArg": {
+          "description": "Zero-based index of the argument containing the flag name.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "provider": {
+          "description": "Optional SDK/provider label shown in output (e.g., `\"LaunchDarkly\"`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "function"
+      ]
+    },
+    "FixConfig": {
+      "description": "Auto-fix behavior settings.",
+      "type": "object",
+      "properties": {
+        "catalog": {
+          "description": "Auto-fix behavior for pnpm catalog edits.",
+          "$ref": "#/$defs/CatalogFixConfig",
+          "default": {
+            "deletePrecedingComments": "auto"
+          }
+        }
+      }
+    },
+    "CatalogFixConfig": {
+      "description": "Auto-fix behavior for pnpm catalog entries.",
+      "type": "object",
+      "properties": {
+        "deletePrecedingComments": {
+          "description": "Whether removing an unused catalog entry also removes the contiguous\nYAML comment block immediately above it.",
+          "$ref": "#/$defs/CatalogPrecedingCommentPolicy",
+          "default": "auto"
+        }
+      }
+    },
+    "CatalogPrecedingCommentPolicy": {
+      "description": "Policy for deleting comments immediately above removed catalog entries.",
+      "oneOf": [
+        {
+          "description": "Delete the comment block when it is separated from previous siblings by\na blank line, or when it directly follows the parent catalog header.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Always delete the contiguous comment block immediately above the entry.",
+          "type": "string",
+          "const": "always"
+        },
+        {
+          "description": "Never delete leading comments; leave them in place as orphan comments.",
+          "type": "string",
+          "const": "never"
+        }
+      ]
+    },
+    "ResolveConfig": {
+      "description": "Module resolver configuration.\n\nControls how fallow resolves import specifiers against package.json\n`exports` / `imports` fields and tsconfig paths. Configured via the\n`resolve` section in `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.\n\n# Examples\n\n```json\n{\n  \"resolve\": {\n    \"conditions\": [\"development\", \"worker\"]\n  }\n}\n```",
+      "type": "object",
+      "properties": {
+        "conditions": {
+          "description": "Additional export/import condition names to honor during module\nresolution. Merged with fallow's built-in conditions (`development`,\n`import`, `require`, `default`, `types`, `node`; plus `react-native`\nand `browser` when the React Native or Expo plugin is active).\n\nUser conditions are matched with higher priority than the baseline,\nso a package.json `exports` entry like:\n\n```json\n{ \"./api\": { \"worker\": \"./src/api.worker.ts\", \"import\": \"./dist/api.js\" } }\n```\n\nresolves to the `worker` branch when `\"worker\"` is listed here.\n\nSee <https://nodejs.org/api/packages.html#community-conditions-definitions>\nfor the set of community-defined conditions.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ProductionConfig": {
+      "description": "Production-mode defaults.",
+      "anyOf": [
+        {
+          "description": "Legacy/global form: `production = true` or `\"production\": true`.",
+          "type": "boolean"
+        },
+        {
+          "description": "Per-analysis form.",
+          "$ref": "#/$defs/PerAnalysisProductionConfig"
+        }
+      ]
+    },
+    "PerAnalysisProductionConfig": {
+      "description": "Per-analysis production-mode defaults.",
+      "type": "object",
+      "properties": {
+        "deadCode": {
+          "description": "Production mode for dead-code analysis.",
+          "type": "boolean",
+          "default": false
+        },
+        "health": {
+          "description": "Production mode for health analysis.",
+          "type": "boolean",
+          "default": false
+        },
+        "dupes": {
+          "description": "Production mode for duplication analysis.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConfigOverride": {
+      "description": "Per-file override entry.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "description": "Glob patterns to match files against (relative to config file location).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rules": {
+          "description": "Partial rules — only specified fields override the base rules.",
+          "$ref": "#/$defs/PartialRulesConfig",
+          "default": {}
+        }
+      },
+      "required": [
+        "files"
+      ]
+    },
+    "PartialRulesConfig": {
+      "description": "Partial per-issue-type severity for overrides. All fields optional.",
+      "type": "object",
+      "properties": {
+        "unused-files": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-exports": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-types": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "private-type-leaks": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-dependencies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-dev-dependencies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-optional-dependencies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-enum-members": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-class-members": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unresolved-imports": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unlisted-dependencies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duplicate-exports": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type-only-dependencies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "test-only-dependencies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "circular-dependencies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "re-export-cycle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "boundary-violation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage-gaps": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "feature-flags": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stale-suppressions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-catalog-entries": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "empty-catalog-groups": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unresolved-catalog-references": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-dependency-overrides": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "misconfigured-dependency-overrides": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RegressionConfig": {
+      "description": "Regression baseline counts, embedded in the config file.\n\nWhen `--fail-on-regression` is used without `--regression-baseline <PATH>`,\nfallow reads the baseline from this config section.\nWhen `--save-regression-baseline` is used without a path argument,\nfallow writes the baseline into the config file.",
+      "type": "object",
+      "properties": {
+        "baseline": {
+          "description": "Dead code issue counts baseline.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RegressionBaseline"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RegressionBaseline": {
+      "description": "Per-type issue counts for regression comparison.",
+      "type": "object",
+      "properties": {
+        "totalIssues": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedFiles": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedExports": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedTypes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedDevDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedOptionalDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedEnumMembers": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedClassMembers": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unresolvedImports": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unlistedDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "duplicateExports": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "circularDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "reExportCycles": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "typeOnlyDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "testOnlyDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "boundaryViolations": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        }
+      }
+    },
+    "AuditConfig": {
+      "description": "Per-analysis baseline paths for the `audit` command.\n\nEach field points to a baseline file produced by the corresponding\nsubcommand (`fallow dead-code --save-baseline`, `fallow health --save-baseline`,\n`fallow dupes --save-baseline`). `audit` passes each baseline through to its\nunderlying analysis; baseline-matched issues are excluded from the verdict.",
+      "type": "object",
+      "properties": {
+        "gate": {
+          "description": "Which findings should make `fallow audit` fail.",
+          "$ref": "#/$defs/AuditGate"
+        },
+        "deadCodeBaseline": {
+          "description": "Path to the dead-code baseline (produced by `fallow dead-code --save-baseline`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "healthBaseline": {
+          "description": "Path to the health baseline (produced by `fallow health --save-baseline`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dupesBaseline": {
+          "description": "Path to the duplication baseline (produced by `fallow dupes --save-baseline`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cacheMaxAgeDays": {
+          "description": "Maximum age (in days since last reuse or fresh create) of a persistent\nreusable base-snapshot worktree cache entry. Older entries are removed\nat the top of the next `fallow audit` invocation. The env var\n`FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` wins over this field. Unset on both\nsides defaults to 30 days. Setting either source to `0` disables the\nsweep entirely (escape hatch for CI runners that prune caches\nout-of-band). Invalid env var values (non-integer, negative) silently\nfall back to this field / default rather than failing the audit.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      }
+    },
+    "AuditGate": {
+      "description": "Gating mode for `fallow audit`.",
+      "oneOf": [
+        {
+          "description": "Only findings introduced by the current changeset affect the verdict.",
+          "type": "string",
+          "const": "new-only"
+        },
+        {
+          "description": "All findings in changed files affect the verdict.",
+          "type": "string",
+          "const": "all"
+        }
+      ]
+    },
+    "CacheConfig": {
+      "description": "Incremental cache configuration.\n\nToday only `maxSizeMb` is exposed. The env var `FALLOW_CACHE_MAX_SIZE`\n(also in MB) wins over this field when both are set. The default cap is\n256 MB; values are interpreted as whole megabytes.",
+      "type": "object",
+      "properties": {
+        "maxSizeMb": {
+          "description": "Maximum on-disk cache size in megabytes. When the serialized cache\nexceeds 80% of this cap during save, the oldest entries are evicted\ndown to 60% of the cap. Default: 256 MB.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

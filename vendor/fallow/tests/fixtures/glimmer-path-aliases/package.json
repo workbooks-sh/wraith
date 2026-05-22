@@ -1,0 +1,4 @@
+{
+  "name": "glimmer-path-aliases",
+  "main": "app/components/my-component.gts"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "html-root-relative",
+  "main": "index.html",
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

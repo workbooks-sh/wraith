@@ -1,0 +1,9 @@
+{
+  "name": "tailwind-plugin-directive",
+  "dependencies": {
+    "@tailwindcss/typography": "^0.5.16",
+    "daisyui": "^5.0.0",
+    "unused-plugin": "^1.0.0"
+  },
+  "main": "src/index.ts"
+}

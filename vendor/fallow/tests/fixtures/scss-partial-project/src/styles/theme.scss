@@ -1,0 +1,6 @@
+@use 'variables' as vars;
+
+:root {
+  --primary: vars.$primary-color;
+  --secondary: vars.$secondary-color;
+}

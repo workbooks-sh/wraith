@@ -1,0 +1,11 @@
+[package]
+name = "crate-b"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "crate-b"
+path = "src/main.rs"
+
+[dependencies]
+crate-a = { path = "../crate-a" }

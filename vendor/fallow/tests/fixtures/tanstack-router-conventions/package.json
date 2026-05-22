@@ -1,0 +1,6 @@
+{
+  "name": "tanstack-router-conventions",
+  "dependencies": {
+    "@tanstack/solid-start": "^1.0.0"
+  }
+}

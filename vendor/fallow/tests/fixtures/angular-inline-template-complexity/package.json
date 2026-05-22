@@ -1,0 +1,8 @@
+{
+  "name": "angular-inline-template-complexity",
+  "main": "src/main.ts",
+  "dependencies": {
+    "@angular/core": "^19.0.0",
+    "@angular/platform-browser": "^19.0.0"
+  }
+}

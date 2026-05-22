@@ -1,0 +1,6 @@
+{
+  "name": "hono-html-tagged-template",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/layout.ts"
+}

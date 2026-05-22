@@ -1,0 +1,32 @@
+[files]
+extend-exclude = [
+    "editors/vscode/dist/",
+    "*.js.map",
+    "tests/fixtures/",
+    "reference/",
+    "benchmarks/",
+]
+
+[default.extend-identifiers]
+ue = "ue"
+ba = "ba"
+caf = "caf"
+fpr = "fpr"
+
+[default.extend-words]
+ba = "ba"
+daa = "daa"
+ist = "ist"
+Informations = "Informations"
+Konfiguration = "Konfiguration"
+Paket = "Paket"
+Pn = "Pn"
+ot = "ot"
+Ot = "Ot"
+# Intentional misspellings in #467 phase 1 unknown-rule-name tests.
+# These mirror the typos the warn path is designed to catch.
+unsued = "unsued"
+dependnecy = "dependnecy"
+# Intentional misspelling in #449 unknown-suppression-kind tests.
+# `unsed-export` is the close-typo Levenshtein-suggestion fixture.
+unsed = "unsed"

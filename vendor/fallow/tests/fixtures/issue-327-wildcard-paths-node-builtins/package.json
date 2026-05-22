@@ -1,0 +1,9 @@
+{
+  "name": "issue-327-wildcard-paths-node-builtins",
+  "type": "module",
+  "main": "main.ts",
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "typescript": "^6.0.3"
+  }
+}

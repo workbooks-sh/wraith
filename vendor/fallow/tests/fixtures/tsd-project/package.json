@@ -1,0 +1,11 @@
+{
+  "name": "tsd-project",
+  "version": "1.0.0",
+  "types": "src/index.d.ts",
+  "tsd": {
+    "directory": "test/types"
+  },
+  "devDependencies": {
+    "tsd": "^0.33.0"
+  }
+}

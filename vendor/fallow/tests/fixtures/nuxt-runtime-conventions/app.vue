@@ -1,0 +1,3 @@
+<template>
+  <RootBadge />
+</template>

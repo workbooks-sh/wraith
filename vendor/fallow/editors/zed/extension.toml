@@ -1,0 +1,15 @@
+id = "fallow"
+name = "Fallow"
+version = "0.1.0"
+schema_version = 1
+authors = ["Fallow contributors"]
+description = "Unused code, dependency, and duplication diagnostics for TypeScript and JavaScript projects."
+repository = "https://github.com/fallow-rs/fallow"
+
+[lib]
+kind = "Rust"
+version = "0.7.0"
+
+[language_servers.fallow]
+name = "Fallow"
+languages = ["TypeScript", "TSX", "JavaScript", "JSX", "Vue", "Svelte", "Astro", "MDX"]

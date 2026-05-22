@@ -1,0 +1,4 @@
+{
+  "name": "duplicate-exports",
+  "main": "src/index.ts"
+}

@@ -1,0 +1,31 @@
+{
+  "routesDirectory": "./src/virtual-routes",
+  "generatedRouteTree": "./src/routeTree.gen.ts",
+  "virtualRouteConfig": {
+    "type": "root",
+    "file": "root.tsx",
+    "children": [
+      {
+        "type": "index",
+        "file": "home.tsx"
+      },
+      {
+        "type": "route",
+        "path": "/admin",
+        "file": "admin/dashboard.tsx"
+      },
+      {
+        "type": "layout",
+        "id": "shell",
+        "file": "layouts/shell.tsx",
+        "children": [
+          {
+            "type": "route",
+            "path": "/settings",
+            "file": "settings.tsx"
+          }
+        ]
+      }
+    ]
+  }
+}

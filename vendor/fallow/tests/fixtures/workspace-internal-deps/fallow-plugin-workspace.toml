@@ -1,0 +1,4 @@
+name = "workspace-plugin"
+enablers = ["@repo/plugin-framework"]
+alwaysUsed = ["src/plugin-kept.ts"]
+toolingDependencies = ["@repo/plugin-framework"]

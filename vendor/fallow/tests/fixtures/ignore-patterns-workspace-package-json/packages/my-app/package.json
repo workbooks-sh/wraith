@@ -1,0 +1,8 @@
+{
+  "name": "@repro/my-app",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@repro/my-lib": "1.0.0"
+  }
+}

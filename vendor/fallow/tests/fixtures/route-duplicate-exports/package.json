@@ -1,0 +1,4 @@
+{
+  "name": "route-duplicate-exports",
+  "main": "src/index.ts"
+}

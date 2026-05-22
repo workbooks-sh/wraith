@@ -1,0 +1,13 @@
+{
+  "name": "issue-310-namespace-object-alias-multi-hop-barrel",
+  "private": true,
+  "exports": {
+    ".": "./consumer.ts"
+  },
+  "workspaces": [
+    "api"
+  ],
+  "dependencies": {
+    "@foo/bar": "workspace:*"
+  }
+}

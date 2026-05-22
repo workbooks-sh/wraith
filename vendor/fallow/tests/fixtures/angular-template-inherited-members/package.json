@@ -1,0 +1,12 @@
+{
+  "name": "angular-template-inherited-members",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/main.ts",
+  "dependencies": {
+    "@angular/core": "^19.0.0",
+    "@angular/common": "^19.0.0",
+    "@angular/forms": "^19.0.0",
+    "@angular/platform-browser": "^19.0.0"
+  }
+}

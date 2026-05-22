@@ -1,0 +1,4 @@
+{
+  "name": "ignore-exports",
+  "main": "src/index.ts"
+}

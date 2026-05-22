@@ -1,0 +1,11 @@
+packages:
+  - 'packages/*'
+
+catalog: {}
+
+catalogs:
+  react17: {}
+  legacy:
+    # intentionally retained migration note
+  vue3:
+    vue: ^3.4.0

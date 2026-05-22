@@ -1,0 +1,76 @@
+{
+  "name": "@fallow-cli/fallow-node",
+  "version": "2.77.0",
+  "description": "Native Node.js bindings for fallow, codebase intelligence for TypeScript and JavaScript. Finds unused code, duplication, circular dependencies, complexity hotspots, and architecture drift. Optional runtime intelligence layer (Fallow Runtime) adds production execution evidence.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "keywords": [
+    "fallow",
+    "typescript",
+    "javascript",
+    "dead-code",
+    "duplication",
+    "complexity",
+    "napi"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fallow-rs/fallow.git",
+    "directory": "crates/napi"
+  },
+  "homepage": "https://docs.fallow.tools",
+  "bugs": {
+    "url": "https://github.com/fallow-rs/fallow/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "napi": {
+    "binaryName": "fallow-node",
+    "packageName": "@fallow-cli/fallow-node",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-musl",
+      "aarch64-pc-windows-msvc",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --release --platform && npm run publish:prepare",
+    "build:debug": "napi build --platform && npm run publish:prepare",
+    "publish:prepare": "node scripts/write-dts.mjs",
+    "prepublishOnly": "npm run publish:prepare",
+    "artifacts": "napi artifacts",
+    "create-npm-dirs": "napi create-npm-dirs",
+    "test": "node test.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.6.0"
+  },
+  "optionalDependencies": {
+    "@fallow-cli/fallow-node-darwin-arm64": "2.77.0",
+    "@fallow-cli/fallow-node-darwin-x64": "2.77.0",
+    "@fallow-cli/fallow-node-linux-arm64-gnu": "2.77.0",
+    "@fallow-cli/fallow-node-linux-arm64-musl": "2.77.0",
+    "@fallow-cli/fallow-node-linux-x64-gnu": "2.77.0",
+    "@fallow-cli/fallow-node-linux-x64-musl": "2.77.0",
+    "@fallow-cli/fallow-node-win32-arm64-msvc": "2.77.0",
+    "@fallow-cli/fallow-node-win32-x64-msvc": "2.77.0"
+  }
+}

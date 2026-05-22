@@ -1,0 +1,42 @@
+rules:
+  # crates.io trusted publishing requires per-crate setup — using CARGO_REGISTRY_TOKEN for now
+  use-trusted-publishing:
+    ignore:
+      - release.yml
+  # dtolnay/rust-toolchain is the Rust ecosystem standard for CI toolchain management
+  # (used in .github/actions/setup-rust/action.yml composite action)
+  superfluous-actions:
+    ignore:
+      - action.yml
+      - release.yml
+  # release.yml separates package-prep (cache restore allowed) from the
+  # privileged publish jobs (no cache, no checkout, only download-artifact +
+  # npm publish --ignore-scripts / vsce publish --packagePath). publish-crates
+  # runs `cargo publish --no-verify` so a poisoned cache cannot influence a
+  # build.rs that sees CARGO_REGISTRY_TOKEN.
+  cache-poisoning:
+    ignore:
+      - release.yml
+  # benchmark-action/gh-release require tokens in with: block (not env-mappable)
+  secrets-outside-env:
+    ignore:
+      - allocs.yml
+      - bench.yml
+      - bloat.yml
+      - conformance.yml
+      - coverage.yml
+      - release.yml
+  # Dependabot auto-merge uses pull_request_target intentionally — no code checkout,
+  # only gh pr merge API call. Actor-gated to dependabot[bot].
+  dangerous-triggers:
+    ignore:
+      - dependabot-auto-merge.yml
+  # github.actor == 'dependabot[bot]' is the standard GitHub-documented pattern;
+  # risk is mitigated by --auto (waits for CI) and no code checkout
+  bot-conditions:
+    ignore:
+      - dependabot-auto-merge.yml
+  # ci-ok job uses toJSON(needs.*.result) which only contains success/failure/cancelled/skipped
+  template-injection:
+    ignore:
+      - ci.yml

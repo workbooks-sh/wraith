@@ -1,0 +1,6 @@
+{
+  "name": "vitepress-docs-project",
+  "devDependencies": {
+    "vitepress": "^1.0.0"
+  }
+}

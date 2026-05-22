@@ -1,0 +1,6 @@
+{
+  "name": "jsx-assets-and-jsdoc",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/layout.tsx"
+}

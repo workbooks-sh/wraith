@@ -1,0 +1,4 @@
+{
+  "name": "scoped-used-class-members",
+  "main": "src/index.ts"
+}

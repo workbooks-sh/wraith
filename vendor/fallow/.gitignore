@@ -1,0 +1,88 @@
+target/
+.cargo/
+node_modules/
+!tests/fixtures/bin-script-deps/node_modules/
+!tests/fixtures/css-package-subpath-import/node_modules/
+!tests/fixtures/scss-node-modules-resolution/node_modules/
+.DS_Store
+# macOS Spotlight index control markers (written into build output dirs)
+.metadata_never_index
+.metadata_never_index_unless_rootfs
+
+# Reference repos (for development only)
+reference
+reference/
+
+# Coverage reports
+coverage/
+# But allow the CLI's `fallow coverage` subcommand module
+!crates/cli/src/coverage/
+# And allow the v8-coverage normalizer crate
+!crates/v8-coverage/
+
+# Benchmark fixtures (generated/downloaded for local benchmarking)
+benchmarks/fixtures
+benchmarks/fixtures/
+
+# Knip v6 local install for benchmarks
+benchmarks/knip6
+benchmarks/knip6/
+
+# Incremental cache
+.fallow/
+
+# Python cache
+__pycache__/
+
+# Proptest regression files
+proptest-regressions/
+
+# npm pack artifacts
+*.tgz
+
+# npm platform binaries (added by CI, not committed)
+npm/darwin-arm64/fallow
+npm/darwin-x64/fallow
+npm/linux-x64-gnu/fallow
+npm/linux-arm64-gnu/fallow
+npm/linux-x64-musl/fallow
+npm/linux-arm64-musl/fallow
+npm/win32-x64-msvc/fallow.exe
+
+# Internal planning docs
+.internal
+.internal/
+
+# Quality audit reports
+quality
+quality/
+
+# VS Code extension build artifacts
+*.vsix
+editors/vscode/.test-dist/
+# Copied from root LICENSE by prepackage script; do not commit
+editors/vscode/LICENSE
+
+# IDE
+.vscode/
+
+# Playwright MCP artifacts
+.playwright-mcp/
+
+# Claude
+.claude/*
+!.claude/settings.json
+!.claude/skills/
+!.claude/rules/
+!.claude/agents/
+
+# Codex
+.codex/
+AGENTS.md
+
+# In-flight feature plans written by /fallow-implement and re-read by /panel-review,
+# the implementation phase, and /fallow-review. Transient; promoted concepts go to decisions/.
+.plans/
+
+# Crash-handover markers from sdk-cli automation
+/HANDOVER-CRASH-*.md

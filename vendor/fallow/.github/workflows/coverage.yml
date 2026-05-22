@@ -1,0 +1,97 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: ./.github/actions/setup-rust
+
+      - uses: taiki-e/install-action@2d15d02e710b40b6332201aba6af30d595b5cd96 # cargo-llvm-cov
+
+      - name: Build CLI binary for e2e tests
+        run: cargo build -p fallow-cli
+
+      - name: Run tests with coverage
+        env:
+          FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow
+        run: |
+          mkdir -p coverage
+          cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
+
+      - name: Compute coverage
+        run: |
+          COVERAGE=$(awk -F: '
+            /^LF:/ { total += $2 }
+            /^LH:/ { hit += $2 }
+            END { if (total > 0) printf "%.1f", (hit/total)*100; else print "0" }
+          ' coverage/lcov.info)
+          echo "COVERAGE=$COVERAGE" >> "$GITHUB_ENV"
+          echo "Coverage: $COVERAGE%"
+
+      - name: Compute badge color
+        run: |
+          int=${COVERAGE%.*}
+          if [ "$int" -ge 90 ]; then color="brightgreen"
+          elif [ "$int" -ge 80 ]; then color="green"
+          elif [ "$int" -ge 70 ]; then color="yellowgreen"
+          elif [ "$int" -ge 60 ]; then color="yellow"
+          elif [ "$int" -ge 50 ]; then color="orange"
+          else color="red"
+          fi
+          echo "BADGE_COLOR=$color" >> "$GITHUB_ENV"
+
+      - name: Write coverage metrics
+        run: |
+          python3 -c "
+          import json
+          data = [{'name': 'Code Coverage', 'unit': '%', 'value': float('${COVERAGE:-0}')}]
+          print(json.dumps(data, indent=2))
+          " > coverage-bench.json
+
+      - name: Store coverage metrics
+        uses: ./.github/actions/store-benchmark
+        with:
+          name: Fallow Coverage
+          tool: customBiggerIsBetter
+          output-file-path: coverage-bench.json
+          data-dir: coverage
+          alert-threshold: '105%'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update coverage badge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin badges
+          git worktree add /tmp/badges --detach origin/badges
+          cd /tmp/badges
+          git checkout -B badges origin/badges
+
+          echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${COVERAGE}%\",\"color\":\"${BADGE_COLOR}\"}" > coverage.json
+
+          git add coverage.json
+          git diff --cached --quiet || git commit -m "chore: update coverage badge to ${COVERAGE}%"
+          git push origin badges
+
+          cd "$GITHUB_WORKSPACE"
+          git worktree remove /tmp/badges

@@ -1,0 +1,11 @@
+{
+  "name": "bin-script-deps",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.2",
+    "publint": "^0.3.0"
+  },
+  "scripts": {
+    "lint": "publint --strict && attw --profile esm-only --pack ."
+  }
+}

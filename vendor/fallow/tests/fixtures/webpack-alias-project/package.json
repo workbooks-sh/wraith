@@ -1,0 +1,6 @@
+{
+  "name": "webpack-alias-project",
+  "dependencies": {
+    "webpack": "^5.0.0"
+  }
+}

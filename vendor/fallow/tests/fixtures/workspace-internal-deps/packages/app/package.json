@@ -1,0 +1,11 @@
+{
+  "name": "@repo/app",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "@repo/ui": "1.0.0",
+    "@repo/unused-internal": "1.0.0",
+    "@repo/plugin-framework": "1.0.0"
+  }
+}

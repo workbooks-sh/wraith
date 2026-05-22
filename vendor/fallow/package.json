@@ -1,0 +1,12 @@
+{
+  "name": "fallow-repo-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "commitlint": "commitlint"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "21.0.1",
+    "@commitlint/config-conventional": "21.0.1"
+  }
+}

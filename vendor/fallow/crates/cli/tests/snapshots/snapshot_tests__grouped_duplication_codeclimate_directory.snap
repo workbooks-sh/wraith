@@ -1,0 +1,91 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/code-duplication",
+    "description": "Code clone group 1 (11 lines, 3 instances)",
+    "categories": [
+      "Duplication"
+    ],
+    "severity": "minor",
+    "fingerprint": "93bea2d4a76a8b7a",
+    "location": {
+      "path": "src/a.ts",
+      "lines": {
+        "begin": 10
+      }
+    },
+    "group": "src"
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/code-duplication",
+    "description": "Code clone group 1 (11 lines, 3 instances)",
+    "categories": [
+      "Duplication"
+    ],
+    "severity": "minor",
+    "fingerprint": "ad7e48aeabd81fcf",
+    "location": {
+      "path": "src/b.ts",
+      "lines": {
+        "begin": 5
+      }
+    },
+    "group": "src"
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/code-duplication",
+    "description": "Code clone group 1 (11 lines, 3 instances)",
+    "categories": [
+      "Duplication"
+    ],
+    "severity": "minor",
+    "fingerprint": "d96cdaf714b23e6b",
+    "location": {
+      "path": "lib/c.ts",
+      "lines": {
+        "begin": 30
+      }
+    },
+    "group": "src"
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/code-duplication",
+    "description": "Code clone group 2 (8 lines, 2 instances)",
+    "categories": [
+      "Duplication"
+    ],
+    "severity": "minor",
+    "fingerprint": "57b59089719fb478",
+    "location": {
+      "path": "lib/x.ts",
+      "lines": {
+        "begin": 1
+      }
+    },
+    "group": "lib"
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/code-duplication",
+    "description": "Code clone group 2 (8 lines, 2 instances)",
+    "categories": [
+      "Duplication"
+    ],
+    "severity": "minor",
+    "fingerprint": "dd8ab1ec1b9ea93f",
+    "location": {
+      "path": "lib/y.ts",
+      "lines": {
+        "begin": 1
+      }
+    },
+    "group": "lib"
+  }
+]

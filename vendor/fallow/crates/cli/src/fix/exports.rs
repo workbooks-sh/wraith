@@ -1,0 +1,1004 @@
+use rustc_hash::FxHashMap;
+use std::path::{Path, PathBuf};
+
+use fallow_config::OutputFormat;
+
+use super::enum_helpers::{EnumDeclarationRange, removable_exported_enum_range};
+use super::plan::{CapturedHashes, FixPlan, read_source_with_hash_check, stage_fixed_content};
+
+pub(super) struct ExportFix {
+    line_idx: usize,
+    export_name: String,
+    enum_declaration: Option<EnumDeclarationRange>,
+}
+
+/// Check if a line (after stripping `export `) is a named export list like `{ A, B } ...`
+fn is_export_list(after_export: &str) -> bool {
+    let s = after_export.trim_start();
+    // `export type { ... }` also counts (handle any whitespace between `type` and `{`)
+    let s = if let Some(rest) = s.strip_prefix("type") {
+        rest.trim_start()
+    } else {
+        s
+    };
+    s.starts_with('{')
+}
+
+/// Given a line like `export { A, B, C } from "./mod";` or `export { A, B, C };`,
+/// remove the specified specifiers. If all specifiers are removed, returns `None`
+/// (meaning the entire line should be deleted). Otherwise returns the updated line.
+fn remove_specifiers_from_export_list(line: &str, names_to_remove: &[&str]) -> Option<String> {
+    let indent = line.len() - line.trim_start().len();
+    let trimmed = line.trim_start();
+
+    // Determine if it's `export type { ... }` or `export { ... }`
+    let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+    let (type_prefix, after_type) = if let Some(rest) = after_export.strip_prefix("type") {
+        if rest.trim_start().starts_with('{') {
+            ("type ", rest.trim_start())
+        } else {
+            ("", after_export)
+        }
+    } else {
+        ("", after_export)
+    };
+
+    // Find the braces
+    let brace_start = after_type.find('{')?;
+    let brace_end = after_type.find('}')?;
+
+    let inside = &after_type[brace_start + 1..brace_end];
+    let after_brace = &after_type[brace_end + 1..];
+
+    // Parse specifiers (handle `A as B` aliases)
+    let remaining: Vec<&str> = inside
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter(|spec| {
+            // Extract the exported name (the original name, before `as`)
+            let exported_name = if let Some((original, _alias)) = spec.split_once(" as ") {
+                original.trim()
+            } else {
+                spec.trim()
+            };
+            !names_to_remove.contains(&exported_name)
+        })
+        .collect();
+
+    if remaining.is_empty() {
+        // All specifiers removed — delete the entire line
+        None
+    } else {
+        let prefix = &line[..indent];
+        let new_inside = remaining.join(", ");
+        Some(format!(
+            "{prefix}export {type_prefix}{{ {new_inside} }}{after_brace}"
+        ))
+    }
+}
+
+fn emit_dry_run_export_fix(relative: &Path, fix: &ExportFix) {
+    if fix.enum_declaration.is_some() {
+        eprintln!(
+            "Would remove enum declaration from {}:{} `{}`",
+            relative.display(),
+            fix.line_idx + 1,
+            fix.export_name,
+        );
+    } else {
+        eprintln!(
+            "Would remove export from {}:{} `{}`",
+            relative.display(),
+            fix.line_idx + 1,
+            fix.export_name,
+        );
+    }
+}
+
+fn push_export_fix_json(
+    fixes: &mut Vec<serde_json::Value>,
+    relative: &Path,
+    absolute: &Path,
+    fix: &ExportFix,
+    applied: Option<bool>,
+) {
+    let mut value = serde_json::json!({
+        "type": "remove_export",
+        "path": relative.display().to_string(),
+        "line": fix.line_idx + 1,
+        "name": fix.export_name,
+    });
+    if let Some(applied) = applied {
+        value["applied"] = serde_json::json!(applied);
+        // Sidechannel: orchestrator reads __target to correlate the entry
+        // with the absolute path the FixPlan committed (or failed). The
+        // field is stripped before the JSON is serialized to stdout.
+        value["__target"] = serde_json::json!(absolute.display().to_string());
+    }
+    fixes.push(value);
+}
+
+/// Apply export fixes to source files, returning JSON fix entries.
+///
+/// Stages every per-file rewrite on `plan` instead of writing directly;
+/// the orchestrator commits the plan after all fixers run, so a single
+/// stage failure in any fixer leaves the project untouched. Hash mismatch
+/// against `hashes` (captured during the in-process analysis read) marks
+/// the file as skipped instead of overwriting bytes the analysis never saw.
+pub(super) fn apply_export_fixes(
+    root: &Path,
+    exports_by_file: &FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>>,
+    hashes: &CapturedHashes,
+    plan: &mut FixPlan,
+    output: OutputFormat,
+    dry_run: bool,
+    fixes: &mut Vec<serde_json::Value>,
+) {
+    for (path, file_exports) in exports_by_file {
+        let Some((content, meta)) = read_source_with_hash_check(root, path, hashes, plan) else {
+            continue;
+        };
+        let lines: Vec<&str> = content.split(meta.line_ending).collect();
+
+        let mut line_fixes: Vec<ExportFix> = Vec::new();
+        for export in file_exports {
+            // Use the 1-indexed line field from the export directly
+            let line_idx = export.line.saturating_sub(1) as usize;
+
+            if line_idx >= lines.len() {
+                continue;
+            }
+
+            let line = lines[line_idx];
+            let trimmed = line.trim_start();
+
+            // Skip lines that don't start with "export "
+            if !trimmed.starts_with("export ") {
+                continue;
+            }
+
+            let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+
+            // Handle `export default` cases
+            if after_export.starts_with("default ") {
+                let after_default = after_export
+                    .strip_prefix("default ")
+                    .unwrap_or(after_export);
+                if after_default.starts_with("function ")
+                    || after_default.starts_with("async function ")
+                    || after_default.starts_with("class ")
+                    || after_default.starts_with("abstract class ")
+                {
+                    // `export default function Foo` -> `function Foo`
+                    // `export default async function Foo` -> `async function Foo`
+                    // `export default class Foo` -> `class Foo`
+                    // `export default abstract class Foo` -> `abstract class Foo`
+                    // handled below via line_fixes
+                } else {
+                    // `export default expression` -> skip (can't safely remove)
+                    continue;
+                }
+            }
+
+            line_fixes.push(ExportFix {
+                line_idx,
+                export_name: export.export_name.clone(),
+                enum_declaration: removable_exported_enum_range(
+                    &lines,
+                    line_idx,
+                    &export.export_name,
+                ),
+            });
+        }
+
+        if line_fixes.is_empty() {
+            continue;
+        }
+
+        // Sort by line index descending so we can work backwards without shifting indices
+        line_fixes.sort_by_key(|f| std::cmp::Reverse(f.line_idx));
+
+        // Group fixes by line_idx (multiple specifiers on the same `export { ... }` line)
+        // We no longer dedup — instead we collect all export names per line.
+        let mut grouped: Vec<(usize, Vec<String>)> = Vec::new();
+        for fix in &line_fixes {
+            if let Some(last) = grouped.last_mut()
+                && last.0 == fix.line_idx
+            {
+                last.1.push(fix.export_name.clone());
+                continue;
+            }
+            grouped.push((fix.line_idx, vec![fix.export_name.clone()]));
+        }
+
+        let relative = path.strip_prefix(root).unwrap_or(path);
+
+        if dry_run {
+            for fix in &line_fixes {
+                if !matches!(output, OutputFormat::Json) {
+                    emit_dry_run_export_fix(relative, fix);
+                }
+                push_export_fix_json(fixes, relative, path, fix, None);
+            }
+        } else {
+            // Apply all fixes to a single in-memory copy
+            let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
+            let mut lines_to_delete: Vec<usize> = Vec::new();
+            let mut ranges_to_delete: Vec<EnumDeclarationRange> = Vec::new();
+
+            for (line_idx, names) in &grouped {
+                if let Some(range) = line_fixes
+                    .iter()
+                    .find(|fix| fix.line_idx == *line_idx && fix.enum_declaration.is_some())
+                    .and_then(|fix| fix.enum_declaration)
+                {
+                    ranges_to_delete.push(range);
+                    continue;
+                }
+
+                let line = &new_lines[*line_idx];
+                let trimmed = line.trim_start();
+                let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+
+                // Check if this is an `export { ... }` or `export type { ... }` line
+                if is_export_list(after_export) {
+                    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+                    match remove_specifiers_from_export_list(line, &name_refs) {
+                        None => {
+                            // All specifiers removed — delete the entire line
+                            lines_to_delete.push(*line_idx);
+                        }
+                        Some(new_line) => {
+                            new_lines[*line_idx] = new_line;
+                        }
+                    }
+                } else {
+                    let indent = line.len() - trimmed.len();
+                    let replacement = if after_export.starts_with("default function ")
+                        || after_export.starts_with("default async function ")
+                        || after_export.starts_with("default class ")
+                        || after_export.starts_with("default abstract class ")
+                    {
+                        // `export default function Foo` -> `function Foo`
+                        after_export
+                            .strip_prefix("default ")
+                            .unwrap_or(after_export)
+                    } else {
+                        after_export
+                    };
+
+                    let prefix = &line[..indent];
+                    new_lines[*line_idx] = format!("{prefix}{replacement}");
+                }
+            }
+
+            // Delete all marked lines in descending order so earlier removals do
+            // not shift later source indices.
+            let mut delete_indices = lines_to_delete;
+            for range in ranges_to_delete {
+                delete_indices.extend(range.start_line..=range.end_line);
+            }
+            delete_indices.sort_unstable();
+            delete_indices.dedup();
+            for &idx in delete_indices.iter().rev() {
+                new_lines.remove(idx);
+            }
+
+            stage_fixed_content(plan, path, &new_lines, &meta, &content);
+
+            // Optimistic: queued for commit. Orchestrator flips `applied`
+            // to false post-commit if the rename failed for this path.
+            for fix in &line_fixes {
+                push_export_fix_json(fixes, relative, path, fix, Some(true));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fallow_core::results::UnusedExport;
+
+    fn make_export(path: &Path, name: &str, line: u32) -> UnusedExport {
+        UnusedExport {
+            path: path.to_path_buf(),
+            export_name: name.to_string(),
+            is_type_only: false,
+            line,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        }
+    }
+
+    /// Build a captured-hashes map containing the real on-disk hash of
+    /// each path that the test wants to consider "freshly analyzed".
+    /// Skipping paths that do not exist on disk keeps the helper compatible
+    /// with tests that exercise the missing-file path.
+    fn capture_hashes(paths: &[&Path]) -> CapturedHashes {
+        let mut hashes = CapturedHashes::default();
+        for path in paths {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                hashes.insert(
+                    path.to_path_buf(),
+                    xxhash_rust::xxh3::xxh3_64(content.as_bytes()),
+                );
+            }
+        }
+        hashes
+    }
+
+    /// Run export fix for a single export. Returns (had_error, fixes).
+    fn fix_single(
+        root: &Path,
+        file: &Path,
+        name: &str,
+        line: u32,
+        dry_run: bool,
+    ) -> (bool, Vec<serde_json::Value>) {
+        let format = if dry_run {
+            OutputFormat::Json
+        } else {
+            OutputFormat::Human
+        };
+        let export = make_export(file, name, line);
+        let mut map: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        map.insert(file.to_path_buf(), vec![&export]);
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[file]);
+        apply_export_fixes(root, &map, &hashes, &mut plan, format, dry_run, &mut fixes);
+        let had_error = if dry_run {
+            false
+        } else {
+            !plan.commit().failed.is_empty()
+        };
+        (had_error, fixes)
+    }
+
+    #[test]
+    fn dry_run_export_fix_does_not_modify_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("src/utils.ts");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let original = "export function foo() {}\nexport function bar() {}\n";
+        std::fs::write(&file, original).unwrap();
+
+        let (_, fixes) = fix_single(root, &file, "foo", 1, true);
+
+        // File should not be modified
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+        // Fix should be reported
+        assert_eq!(fixes.len(), 1);
+        assert_eq!(fixes[0]["type"], "remove_export");
+        assert_eq!(fixes[0]["name"], "foo");
+        assert!(fixes[0].get("applied").is_none());
+    }
+
+    #[test]
+    fn actual_export_fix_removes_export_keyword() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("utils.ts");
+        std::fs::write(&file, "export function foo() {}\nexport const bar = 1;\n").unwrap();
+
+        let (had_error, fixes) = fix_single(root, &file, "foo", 1, false);
+
+        assert!(!had_error);
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "function foo() {}\nexport const bar = 1;\n");
+        assert_eq!(fixes.len(), 1);
+        assert_eq!(fixes[0]["applied"], true);
+    }
+
+    #[test]
+    fn export_fix_removes_default_from_function() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("component.ts");
+        std::fs::write(&file, "export default function App() {}\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "default", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "function App() {}\n");
+    }
+
+    #[test]
+    fn export_fix_removes_default_from_class() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("service.ts");
+        std::fs::write(&file, "export default class MyService {}\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "default", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "class MyService {}\n");
+    }
+
+    #[test]
+    fn export_fix_removes_default_from_abstract_class() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("base.ts");
+        std::fs::write(&file, "export default abstract class Base {}\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "default", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "abstract class Base {}\n");
+    }
+
+    #[test]
+    fn export_fix_removes_default_from_async_function() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("handler.ts");
+        std::fs::write(&file, "export default async function handler() {}\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "default", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "async function handler() {}\n");
+    }
+
+    #[test]
+    fn export_fix_skips_default_expression_export() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("config.ts");
+        let original = "export default { key: 'value' };\n";
+        std::fs::write(&file, original).unwrap();
+
+        let (_, fixes) = fix_single(root, &file, "default", 1, false);
+
+        // File unchanged — expression defaults are not safely removable
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+        assert!(fixes.is_empty());
+    }
+
+    #[test]
+    fn export_fix_preserves_indentation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("mod.ts");
+        std::fs::write(&file, "  export const x = 1;\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "x", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "  const x = 1;\n");
+    }
+
+    #[test]
+    fn export_fix_preserves_crlf_line_endings() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("win.ts");
+        std::fs::write(
+            &file,
+            "export function foo() {}\r\nexport function bar() {}\r\n",
+        )
+        .unwrap();
+
+        let (_, _) = fix_single(root, &file, "foo", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "function foo() {}\r\nexport function bar() {}\r\n");
+    }
+
+    #[test]
+    fn export_fix_skips_path_outside_project_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        let outside_file = dir.path().join("outside.ts");
+        let original = "export function evil() {}\n";
+        std::fs::write(&outside_file, original).unwrap();
+
+        let export = make_export(&outside_file, "evil", 1);
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        exports_by_file.insert(outside_file.clone(), vec![&export]);
+
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&outside_file]);
+        apply_export_fixes(
+            &root,
+            &exports_by_file,
+            &hashes,
+            &mut plan,
+            OutputFormat::Human,
+            false,
+            &mut fixes,
+        );
+        let _ = plan.commit();
+
+        // File should be untouched and no fixes generated
+        assert_eq!(std::fs::read_to_string(&outside_file).unwrap(), original);
+        assert!(fixes.is_empty());
+    }
+
+    #[test]
+    fn export_fix_skips_line_not_starting_with_export() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("tricky.ts");
+        let original = "const foo = 'export something';\n";
+        std::fs::write(&file, original).unwrap();
+
+        let (_, fixes) = fix_single(root, &file, "foo", 1, false);
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+        assert!(fixes.is_empty());
+    }
+
+    #[test]
+    fn export_fix_handles_multiple_exports_in_same_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("multi.ts");
+        std::fs::write(
+            &file,
+            "export function a() {}\nexport const b = 1;\nexport class C {}\n",
+        )
+        .unwrap();
+
+        let e1 = make_export(&file, "a", 1);
+        let e2 = make_export(&file, "C", 3);
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        exports_by_file.insert(file.clone(), vec![&e1, &e2]);
+
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
+        apply_export_fixes(
+            root,
+            &exports_by_file,
+            &hashes,
+            &mut plan,
+            OutputFormat::Human,
+            false,
+            &mut fixes,
+        );
+        let _ = plan.commit();
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            content,
+            "function a() {}\nexport const b = 1;\nclass C {}\n"
+        );
+        assert_eq!(fixes.len(), 2);
+    }
+
+    #[test]
+    fn export_fix_skips_out_of_bounds_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("short.ts");
+        std::fs::write(&file, "export function a() {}\n").unwrap();
+
+        // Line 999 is way out of bounds
+        let (_, fixes) = fix_single(root, &file, "ghost", 999, false);
+
+        // File unchanged, no fixes
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "export function a() {}\n");
+        assert!(fixes.is_empty());
+    }
+
+    #[test]
+    fn export_fix_removes_export_from_const() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("constants.ts");
+        std::fs::write(&file, "export const MAX = 100;\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "MAX", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "const MAX = 100;\n");
+    }
+
+    #[test]
+    fn export_fix_removes_export_from_let() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("state.ts");
+        std::fs::write(&file, "export let counter = 0;\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "counter", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "let counter = 0;\n");
+    }
+
+    #[test]
+    fn export_fix_removes_export_from_type_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("types.ts");
+        std::fs::write(&file, "export type Foo = string;\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "Foo", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "type Foo = string;\n");
+    }
+
+    #[test]
+    fn export_fix_removes_export_from_interface() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("types.ts");
+        std::fs::write(&file, "export interface Bar {\n  name: string;\n}\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "Bar", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "interface Bar {\n  name: string;\n}\n");
+    }
+
+    #[test]
+    fn export_fix_removes_export_from_enum() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("enums.ts");
+        std::fs::write(&file, "export enum Status { Active, Inactive }\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "Status", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "\n");
+    }
+
+    #[test]
+    fn export_fix_removes_multiline_exported_enum_when_unused_locally() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("enums.ts");
+        std::fs::write(
+            &file,
+            "const before = 1;\nexport enum Status {\n  Active,\n  Inactive,\n}\nconst after = 2;\n",
+        )
+        .unwrap();
+
+        let (_, fixes) = fix_single(root, &file, "Status", 2, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "const before = 1;\nconst after = 2;\n");
+        assert_eq!(fixes.len(), 1);
+        assert_eq!(fixes[0]["type"], "remove_export");
+        assert_eq!(fixes[0]["name"], "Status");
+        assert_eq!(fixes[0]["applied"], true);
+    }
+
+    #[test]
+    fn export_fix_only_removes_export_from_enum_when_used_locally() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("enums.ts");
+        std::fs::write(
+            &file,
+            "export enum Status {\n  Active,\n  Inactive,\n}\nconsole.log(Status.Active);\n",
+        )
+        .unwrap();
+
+        let (_, _) = fix_single(root, &file, "Status", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            content,
+            "enum Status {\n  Active,\n  Inactive,\n}\nconsole.log(Status.Active);\n"
+        );
+    }
+
+    #[test]
+    fn export_fix_removes_const_enum_declaration() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("enums.ts");
+        std::fs::write(&file, "export const enum Status { Active }\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "Status", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "\n");
+    }
+
+    #[test]
+    fn export_fix_deletes_export_list_before_enum_without_shift() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("index.ts");
+        std::fs::write(
+            &file,
+            "export { unused } from './unused';\nexport enum Status {\n  Active,\n}\nexport const kept = 1;\n",
+        )
+        .unwrap();
+
+        let e1 = make_export(&file, "unused", 1);
+        let e2 = make_export(&file, "Status", 2);
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        exports_by_file.insert(file.clone(), vec![&e1, &e2]);
+
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
+        apply_export_fixes(
+            root,
+            &exports_by_file,
+            &hashes,
+            &mut plan,
+            OutputFormat::Human,
+            false,
+            &mut fixes,
+        );
+        let _ = plan.commit();
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "export const kept = 1;\n");
+    }
+
+    #[test]
+    fn export_fix_deduplicates_same_line() {
+        // Two exports pointing to the same line should only apply one fix
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("dup.ts");
+        std::fs::write(&file, "export function foo() {}\n").unwrap();
+
+        let e1 = make_export(&file, "foo", 1);
+        let e2 = make_export(&file, "foo", 1); // duplicate line
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        exports_by_file.insert(file.clone(), vec![&e1, &e2]);
+
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
+        apply_export_fixes(
+            root,
+            &exports_by_file,
+            &hashes,
+            &mut plan,
+            OutputFormat::Human,
+            false,
+            &mut fixes,
+        );
+        let _ = plan.commit();
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "function foo() {}\n");
+        // Both fixes are reported (same line, same name)
+        assert_eq!(fixes.len(), 2);
+    }
+
+    #[test]
+    fn export_fix_preserves_tab_indentation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("tabbed.ts");
+        std::fs::write(&file, "\texport const x = 1;\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "x", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "\tconst x = 1;\n");
+    }
+
+    #[test]
+    fn export_fix_line_zero_saturating_sub() {
+        // line=0 should saturate to 0 (line_idx = 0)
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("zero.ts");
+        std::fs::write(&file, "export function first() {}\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "first", 0, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "function first() {}\n");
+    }
+
+    #[test]
+    fn export_fix_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("empty.ts");
+        std::fs::write(&file, "").unwrap();
+
+        let (_, fixes) = fix_single(root, &file, "x", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "");
+        assert!(fixes.is_empty());
+    }
+
+    #[test]
+    fn dry_run_with_human_output_reports_fixes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("mod.ts");
+        let original = "export function foo() {}\n";
+        std::fs::write(&file, original).unwrap();
+
+        let export = make_export(&file, "foo", 1);
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        exports_by_file.insert(file.clone(), vec![&export]);
+
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
+        apply_export_fixes(
+            root,
+            &exports_by_file,
+            &hashes,
+            &mut plan,
+            OutputFormat::Human,
+            true,
+            &mut fixes,
+        );
+
+        // File not modified
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+        assert_eq!(fixes.len(), 1);
+        assert_eq!(fixes[0]["type"], "remove_export");
+        assert!(fixes[0].get("applied").is_none());
+    }
+
+    #[test]
+    fn export_fix_skips_default_variable_export() {
+        // `export default someVariable;` should not be touched
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("config.ts");
+        let original = "export default someVariable;\n";
+        std::fs::write(&file, original).unwrap();
+
+        let (_, fixes) = fix_single(root, &file, "default", 1, false);
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+        assert!(fixes.is_empty());
+    }
+
+    #[test]
+    fn export_fix_nonexistent_file_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("missing.ts"); // Does not exist
+
+        let (had_error, fixes) = fix_single(root, &file, "foo", 1, false);
+
+        assert!(!had_error);
+        assert!(fixes.is_empty());
+    }
+
+    #[test]
+    fn export_fix_returns_relative_path_in_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("src").join("utils.ts");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(&file, "export const x = 1;\n").unwrap();
+
+        let (_, fixes) = fix_single(root, &file, "x", 1, false);
+
+        let path_str = fixes[0]["path"].as_str().unwrap().replace('\\', "/");
+        assert_eq!(path_str, "src/utils.ts");
+    }
+
+    #[test]
+    fn export_fix_removes_specifier_from_export_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("index.ts");
+        std::fs::write(&file, "export { Foo, Bar, Baz } from \"./mod\";\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "Bar", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "export { Foo, Baz } from \"./mod\";\n");
+    }
+
+    #[test]
+    fn export_fix_removes_all_specifiers_deletes_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("index.ts");
+        std::fs::write(
+            &file,
+            "export { Foo, Bar } from \"./mod\";\nexport const x = 1;\n",
+        )
+        .unwrap();
+
+        let e1 = make_export(&file, "Foo", 1);
+        let e2 = make_export(&file, "Bar", 1);
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        exports_by_file.insert(file.clone(), vec![&e1, &e2]);
+
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
+        apply_export_fixes(
+            root,
+            &exports_by_file,
+            &hashes,
+            &mut plan,
+            OutputFormat::Human,
+            false,
+            &mut fixes,
+        );
+        let _ = plan.commit();
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "export const x = 1;\n");
+    }
+
+    #[test]
+    fn export_fix_handles_export_list_without_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("barrel.ts");
+        std::fs::write(
+            &file,
+            "const A = 1;\nconst B = 2;\nconst C = 3;\nexport { A, B, C };\n",
+        )
+        .unwrap();
+
+        let (_, _) = fix_single(root, &file, "B", 4, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            content,
+            "const A = 1;\nconst B = 2;\nconst C = 3;\nexport { A, C };\n"
+        );
+    }
+
+    #[test]
+    fn export_fix_handles_export_type_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("types.ts");
+        std::fs::write(&file, "export type { Foo, Bar } from \"./types\";\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "Foo", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "export type { Bar } from \"./types\";\n");
+    }
+
+    #[test]
+    fn export_fix_handles_aliased_specifiers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("index.ts");
+        std::fs::write(&file, "export { Foo as MyFoo, Bar } from \"./mod\";\n").unwrap();
+
+        // The export name reported by fallow is the original name
+        let (_, _) = fix_single(root, &file, "Foo", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "export { Bar } from \"./mod\";\n");
+    }
+
+    #[test]
+    fn export_fix_single_specifier_list_deletes_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("index.ts");
+        std::fs::write(
+            &file,
+            "export { Foo } from \"./foo\";\nexport { Bar } from \"./bar\";\n",
+        )
+        .unwrap();
+
+        let (_, _) = fix_single(root, &file, "Foo", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "export { Bar } from \"./bar\";\n");
+    }
+}

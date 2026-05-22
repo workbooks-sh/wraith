@@ -1,0 +1,4 @@
+{
+  "name": "entry-export-validation-config",
+  "main": "src/index.ts"
+}

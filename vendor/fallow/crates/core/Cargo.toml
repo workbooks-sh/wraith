@@ -1,0 +1,90 @@
+[package]
+name = "fallow-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Analysis orchestration for fallow codebase intelligence (dead code, duplication, plugins, cross-reference)"
+readme = "../../README.md"
+
+[lib]
+doctest = false
+
+[dependencies]
+fallow-config = { workspace = true }
+fallow-extract = { workspace = true }
+fallow-graph = { workspace = true }
+fallow-types = { workspace = true }
+
+# Parsing & analysis
+oxc_allocator = { workspace = true }
+oxc_ast = { workspace = true }
+oxc_ast_visit = { workspace = true }
+oxc_parser = { workspace = true }
+oxc_semantic = { workspace = true }
+oxc_span = { workspace = true }
+oxc_str = { workspace = true }
+oxc_syntax = { workspace = true }
+
+# Parallelism
+rayon = { workspace = true }
+
+# File system
+dunce = { workspace = true }
+ignore = { workspace = true }
+glob = { workspace = true }
+globset = { workspace = true }
+regex = { workspace = true }
+tempfile = { workspace = true }
+
+# Serialization
+bitcode = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+
+# Hashing
+xxhash-rust = { workspace = true }
+rustc-hash = { workspace = true }
+
+# Progress
+indicatif = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# JSON Schema generation for duplication result types. Gated by the `schema`
+# feature so this only compiles when the schema-emit binary asks for it.
+schemars = { workspace = true, optional = true }
+
+[features]
+# Mirrors fallow-types' `schema` feature: enables `#[derive(schemars::JsonSchema)]`
+# on `DuplicationReport` and friends so the public JSON output contract can be
+# regenerated from the Rust source of truth.
+schema = ["dep:schemars", "fallow-types/schema"]
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+dhat = { workspace = true }
+toml = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "analysis"
+harness = false
+
+[[bench]]
+name = "large_analysis"
+harness = false
+
+[[bench]]
+name = "allocations"
+harness = false

@@ -1,0 +1,13 @@
+{
+  "entry": ["packages/app/src/login.tsx"],
+  "boundaries": {
+    "zones": [
+      { "name": "ui", "patterns": ["src/**"], "root": "packages/app/" },
+      { "name": "domain", "patterns": ["src/**"], "root": "packages/core/" }
+    ],
+    "rules": [
+      { "from": "ui", "allow": [] },
+      { "from": "domain", "allow": [] }
+    ]
+  }
+}

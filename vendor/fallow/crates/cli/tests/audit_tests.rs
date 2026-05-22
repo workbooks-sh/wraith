@@ -1,0 +1,1299 @@
+#[path = "common/mod.rs"]
+mod common;
+
+use common::{fallow_bin, parse_json, run_fallow_raw};
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+use tempfile::TempDir;
+
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@test.com")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@test.com")
+        .output()
+        .expect("git command failed");
+    assert!(
+        output.status.success(),
+        "git {:?} failed\nstdout: {}\nstderr: {}",
+        args,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn commit_all(dir: &std::path::Path, message: &str) {
+    git(dir, &["add", "."]);
+    git(
+        dir,
+        &["-c", "commit.gpgsign=false", "commit", "-m", message],
+    );
+}
+
+/// Create a temp git repo with a commit, suitable for audit testing.
+/// Returns the `TempDir` guard so the directory lives as long as the caller holds it.
+fn create_audit_fixture(_suffix: &str) -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "audit-test", "main": "src/index.ts", "dependencies": {"unused-pkg": "1.0.0"}}"#,
+    )
+    .unwrap();
+
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './utils';\nused();\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/utils.ts"),
+        "export const used = () => 42;\nexport const unused = () => 0;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/orphan.ts"),
+        "export const orphaned = 'nobody';\n",
+    )
+    .unwrap();
+
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            // Isolate from parent git context (pre-push hook sets GIT_DIR to the main repo,
+            // which overrides current_dir and causes commits to leak into the real repo)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git command failed")
+    };
+
+    git(&["init", "-b", "main"]);
+    git(&["add", "."]);
+    git(&["-c", "commit.gpgsign=false", "commit", "-m", "initial"]);
+
+    tmp
+}
+
+fn write_branchy_change(dir: &std::path::Path) {
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './utils';\n\
+         used();\n\
+         function branchy(n: number): number {\n\
+           if (n < 0) return -1;\n\
+           if (n === 0) return 0;\n\
+           if (n < 10) return 1;\n\
+           if (n < 100) return 2;\n\
+           if (n < 1000) return 3;\n\
+           if (n < 10000) return 4;\n\
+           return 5;\n\
+         }\n\
+         branchy(used());\n",
+    )
+    .unwrap();
+    commit_all(dir, "add branchy");
+}
+
+fn write_branchy_istanbul_coverage(coverage_path: &std::path::Path, coverage_source_path: &str) {
+    fs::create_dir_all(coverage_path.parent().unwrap()).unwrap();
+    let mut coverage = serde_json::Map::new();
+    coverage.insert(
+        coverage_source_path.to_string(),
+        serde_json::json!({
+            "path": coverage_source_path,
+            "statementMap": {},
+            "fnMap": {
+                "0": {
+                    "name": "branchy",
+                    "line": 3,
+                    "decl": {
+                        "start": { "line": 3, "column": 9 },
+                        "end": { "line": 3, "column": 16 }
+                    },
+                    "loc": {
+                        "start": { "line": 3, "column": 35 },
+                        "end": { "line": 11, "column": 10 }
+                    }
+                }
+            },
+            "branchMap": {},
+            "s": {},
+            "f": { "0": 1 },
+            "b": {}
+        }),
+    );
+    fs::write(coverage_path, serde_json::to_string(&coverage).unwrap()).unwrap();
+}
+
+fn run_fallow_raw_with_env(
+    args: &[&str],
+    env: &[(&str, &std::path::Path)],
+) -> common::CommandOutput {
+    let mut cmd = Command::new(fallow_bin());
+    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    for arg in args {
+        cmd.arg(arg);
+    }
+    let output = cmd.output().expect("failed to run fallow binary");
+    common::CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Audit JSON output structure
+// ---------------------------------------------------------------------------
+
+#[test]
+fn audit_json_has_verdict_and_schema() {
+    let dir = create_audit_fixture("verdict");
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 0,
+        "audit with no changes should exit 0. stderr: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    assert_eq!(
+        json["verdict"].as_str(),
+        Some("pass"),
+        "no changes should give pass verdict"
+    );
+    assert_eq!(
+        json["command"].as_str(),
+        Some("audit"),
+        "command should be 'audit'"
+    );
+    assert!(
+        json.get("schema_version").is_some(),
+        "audit JSON should have schema_version"
+    );
+}
+
+#[test]
+fn audit_pass_verdict_when_no_changes() {
+    let dir = create_audit_fixture("nochanges");
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(output.code, 0, "no changes should give exit 0");
+
+    let json = parse_json(&output);
+    assert_eq!(
+        json["verdict"].as_str(),
+        Some("pass"),
+        "no changes should give pass verdict"
+    );
+    assert_eq!(
+        json["changed_files_count"].as_u64(),
+        Some(0),
+        "should report 0 changed files"
+    );
+}
+
+/// Audit's HEAD analyses and base-snapshot computation run concurrently via
+/// `rayon::join`; inside the base snapshot, check and dupes also run
+/// concurrently. Verify nondeterministic scheduling does not leak into the
+/// rendered JSON: repeated runs against the same fixture must produce
+/// byte-identical output once wall-clock fields are stripped.
+#[test]
+fn audit_parallel_output_is_deterministic() {
+    let dir = create_audit_fixture("determinism");
+
+    fs::write(
+        dir.path().join("src/new.ts"),
+        "export const dupA = (x: number) => x + 1;\nexport const dupB = (x: number) => x + 1;\n",
+    )
+    .unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["-c", "commit.gpgsign=false", "commit", "-m", "add new file"])
+        .current_dir(dir.path())
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@test.com")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@test.com")
+        .output()
+        .unwrap();
+
+    fn normalize(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.remove("elapsed_ms");
+                map.remove("head_sha");
+                for v in map.values_mut() {
+                    normalize(v);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for v in items {
+                    normalize(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut canonicalized: Vec<String> = std::iter::repeat_with(|| {
+        let output = run_fallow_raw(&[
+            "audit",
+            "--root",
+            dir.path().to_str().unwrap(),
+            "--base",
+            "HEAD~1",
+            "--format",
+            "json",
+            "--quiet",
+        ]);
+        assert!(
+            output.code == 0 || output.code == 1,
+            "audit run should not crash: stdout={}\nstderr={}",
+            output.stdout,
+            output.stderr
+        );
+        let mut value = parse_json(&output);
+        normalize(&mut value);
+        serde_json::to_string(&value).expect("re-serialize canonical json")
+    })
+    .take(3)
+    .collect();
+
+    let first = canonicalized.remove(0);
+    for (idx, run) in canonicalized.iter().enumerate() {
+        assert_eq!(
+            &first,
+            run,
+            "audit parallel run #{} differed from run #0",
+            idx + 1
+        );
+    }
+}
+
+#[test]
+fn audit_json_has_summary_with_changes() {
+    let dir = create_audit_fixture("summary");
+
+    fs::write(
+        dir.path().join("src/new.ts"),
+        "export const newThing = 'added';\n",
+    )
+    .unwrap();
+
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["-c", "commit.gpgsign=false", "commit", "-m", "add new file"])
+        .current_dir(dir.path())
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@test.com")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@test.com")
+        .output()
+        .unwrap();
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        output.code == 0 || output.code == 1,
+        "audit should not crash, got exit {}. stderr: {}",
+        output.code,
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    assert!(
+        json.get("summary").is_some(),
+        "audit JSON should have summary"
+    );
+    let summary = &json["summary"];
+    assert!(
+        summary.get("dead_code_issues").is_some(),
+        "summary should have dead_code_issues"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Audit baseline support (issue #139)
+// ---------------------------------------------------------------------------
+
+/// Create a fixture whose legacy file already has several unused exports,
+/// then branch and touch that file without introducing new issues.
+///
+/// Returns the `TempDir` guard. The fixture is on a branch named
+/// `feature`; the default branch is `main`.
+fn create_audit_baseline_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "audit-baseline-test", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("tsconfig.json"),
+        r#"{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"bundler"},"include":["src"]}"#,
+    )
+    .unwrap();
+
+    // Legacy file with multiple pre-existing unused exports.
+    fs::write(
+        dir.join("src/legacy.ts"),
+        "export const used = 1;\n\
+         export const unusedA = 'a';\n\
+         export const unusedB = 'b';\n\
+         export const unusedC = 'c';\n\
+         export const unusedD = 'd';\n\
+         export const unusedE = 'e';\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './legacy';\nconsole.log(used);\n",
+    )
+    .unwrap();
+
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git command failed")
+    };
+
+    git(&["init", "-b", "main"]);
+    git(&["add", "."]);
+    git(&["-c", "commit.gpgsign=false", "commit", "-m", "initial"]);
+    git(&["checkout", "-b", "feature"]);
+
+    // Touch the legacy file without adding new issues.
+    let legacy = fs::read_to_string(dir.join("src/legacy.ts")).unwrap();
+    fs::write(dir.join("src/legacy.ts"), format!("{legacy}// touched\n")).unwrap();
+    git(&["add", "."]);
+    git(&["-c", "commit.gpgsign=false", "commit", "-m", "touch legacy"]);
+
+    tmp
+}
+
+#[test]
+fn audit_default_gate_ignores_inherited_issues() {
+    let tmp = create_audit_baseline_fixture();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 0,
+        "audit should pass when touched file has only inherited issues. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("pass"));
+    let dead_code_issues = json["summary"]["dead_code_issues"]
+        .as_u64()
+        .expect("summary.dead_code_issues should be present");
+    assert!(
+        dead_code_issues >= 5,
+        "expected at least 5 pre-existing unused exports, got {dead_code_issues}"
+    );
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(0)
+    );
+    assert!(
+        json["attribution"]["dead_code_inherited"]
+            .as_u64()
+            .is_some_and(|count| count >= 5),
+        "expected inherited dead-code attribution"
+    );
+    let inherited_exports = json["dead_code"]["unused_exports"]
+        .as_array()
+        .expect("dead_code.unused_exports should be an array");
+    assert!(
+        inherited_exports
+            .iter()
+            .all(|item| item["introduced"] == false),
+        "all touched legacy exports should be annotated as inherited"
+    );
+}
+
+#[test]
+fn audit_gate_all_reports_preexisting_issues() {
+    let tmp = create_audit_baseline_fixture();
+    fs::write(tmp.path().join("fallow.toml"), "[audit]\ngate = \"all\"\n").unwrap();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--config",
+        tmp.path().join("fallow.toml").to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "audit should fail when audit.gate=all and touched file has pre-existing issues. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    assert_eq!(json["attribution"]["gate"].as_str(), Some("all"));
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(0),
+        "gate=all should skip base attribution work"
+    );
+    assert_eq!(
+        json["attribution"]["dead_code_inherited"].as_u64(),
+        Some(0),
+        "gate=all should skip base attribution work"
+    );
+    assert!(
+        json["dead_code"]["unused_exports"][0]
+            .get("introduced")
+            .is_none(),
+        "gate=all should not annotate per-issue introduced fields without a base snapshot"
+    );
+}
+
+#[test]
+fn audit_gate_cli_flag_overrides_default() {
+    let tmp = create_audit_baseline_fixture();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--gate",
+        "all",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "--gate all should fail on inherited findings. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    assert_eq!(json["attribution"]["gate"].as_str(), Some("all"));
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(0)
+    );
+    assert_eq!(json["attribution"]["dead_code_inherited"].as_u64(), Some(0));
+}
+
+#[test]
+fn audit_help_documents_gate() {
+    let output = run_fallow_raw(&["audit", "--help"]);
+    assert_eq!(output.code, 0, "audit --help should succeed");
+    assert!(
+        output.stdout.contains("--gate <GATE>"),
+        "--help should include --gate, got:\n{}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("new-only") && output.stdout.contains("introduced"),
+        "--help should document new-only semantics, got:\n{}",
+        output.stdout
+    );
+}
+
+#[test]
+fn audit_base_preserves_node_modules_tsconfig_extends_context() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join(".gitignore"), "node_modules\n.fallow\n").unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-rn-alias","main":"src/index.ts","dependencies":{"@react-native/typescript-config":"1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("tsconfig.json"),
+        r#"{"extends":"./node_modules/@react-native/typescript-config/tsconfig.json","compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}},"include":["src"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from '@/feature';\nconsole.log(used);\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/feature.ts"),
+        "export const used = 1;\nexport const legacyUnused = 2;\n",
+    )
+    .unwrap();
+
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    let rn_config = dir.join("node_modules/@react-native/typescript-config");
+    fs::create_dir_all(&rn_config).unwrap();
+    fs::write(
+        rn_config.join("tsconfig.json"),
+        r#"{"compilerOptions":{"jsx":"react-native","moduleResolution":"bundler"}}"#,
+    )
+    .unwrap();
+
+    // Add a real new export so the diff is not token-equivalent. A comment-only
+    // change would trip the `can_reuse_current_as_base` fast path and skip
+    // `BaseWorktree::create` entirely, defeating the point of this test.
+    fs::write(
+        dir.join("src/feature.ts"),
+        "export const used = 1;\nexport const legacyUnused = 2;\nexport const introduced = 3;\n",
+    )
+    .unwrap();
+    commit_all(dir, "introduce new export");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+
+    assert!(
+        !output.stderr.contains("Broken tsconfig chain")
+            && !output.stderr.contains("node_modules directory not found"),
+        "audit base worktree should retain installed tsconfig context. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["dead_code"]["summary"]["unresolved_imports"].as_u64(),
+        Some(0),
+        "tsconfig alias should resolve in the current analysis"
+    );
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(1),
+        "only the genuinely new export should be attributed to the changeset"
+    );
+}
+
+#[test]
+fn audit_new_unlisted_dependency_import_site_is_introduced() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-unlisted","main":"src/index.ts","dependencies":{}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("tsconfig.json"),
+        r#"{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"bundler"},"include":["src"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/a.ts"),
+        "import leftPad from 'left-pad';\nexport const a = leftPad('a', 2);\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { a } from './a';\nconsole.log(a);\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    fs::write(
+        dir.join("src/b.ts"),
+        "import leftPad from 'left-pad';\nexport const b = leftPad('b', 2);\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { a } from './a';\nimport { b } from './b';\nconsole.log(a, b);\n",
+    )
+    .unwrap();
+    commit_all(dir, "add b");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "new unlisted import site should fail new-only audit. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        json["dead_code"]["unlisted_dependencies"][0]["introduced"],
+        true
+    );
+}
+
+#[test]
+fn audit_empty_catalog_group_changed_manifest_is_introduced() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("packages/app")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-empty-catalog-group","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("packages/app/package.json"),
+        r#"{"name":"app","private":true,"main":"src/index.ts","dependencies":{"vue":"catalog:vue3"}}"#,
+    )
+    .unwrap();
+    fs::create_dir_all(dir.join("packages/app/src")).unwrap();
+    fs::write(
+        dir.join("packages/app/src/index.ts"),
+        "import { ref } from 'vue';\nconsole.log(ref);\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/*'\n\ncatalogs:\n  vue3:\n    vue: ^3.4.0\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    fs::write(
+        dir.join("pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/*'\n\ncatalogs:\n  legacy: {}\n  vue3:\n    old-react: ^17.0.2\n    vue: ^3.4.0\n",
+    )
+    .unwrap();
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+
+    assert_eq!(
+        output.code, 0,
+        "new warning-level catalog hygiene should not fail audit. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("warn"));
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(
+        json["dead_code"]["unused_catalog_entries"][0]["entry_name"].as_str(),
+        Some("old-react")
+    );
+    assert_eq!(
+        json["dead_code"]["unused_catalog_entries"][0]["introduced"],
+        true
+    );
+    assert_eq!(
+        json["dead_code"]["empty_catalog_groups"][0]["catalog_name"].as_str(),
+        Some("legacy")
+    );
+    assert_eq!(
+        json["dead_code"]["empty_catalog_groups"][0]["introduced"],
+        true
+    );
+}
+
+#[test]
+fn audit_dependency_location_change_is_introduced() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-dep-move","main":"src/index.ts","devDependencies":{"left-pad":"1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/index.ts"), "console.log('hi');\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-dep-move","main":"src/index.ts","dependencies":{"left-pad":"1.0.0"}}"#,
+    )
+    .unwrap();
+    commit_all(dir, "move dependency");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "moving an unused package into dependencies should be introduced. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        json["dead_code"]["unused_dependencies"][0]["introduced"],
+        true
+    );
+}
+
+#[test]
+fn audit_with_dead_code_baseline_filters_preexisting_issues() {
+    let tmp = create_audit_baseline_fixture();
+    let dir = tmp.path();
+    let baseline_path = dir.join(".fallow-dead-code-baseline.json");
+
+    // Save baseline from `main` state (before touching the file).
+    // Switch back to main, save, then back to feature.
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git command failed")
+    };
+    git(&["checkout", "main"]);
+    let save = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        dir.to_str().unwrap(),
+        "--save-baseline",
+        baseline_path.to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert!(
+        save.code == 0 || save.code == 1,
+        "save-baseline should not crash, got {}: {}",
+        save.code,
+        save.stderr
+    );
+    assert!(
+        baseline_path.exists(),
+        "baseline file should have been written"
+    );
+    git(&["checkout", "feature"]);
+
+    // Now audit with the dead-code baseline.
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--dead-code-baseline",
+        baseline_path.to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 0,
+        "audit with dead-code baseline should pass (no new issues). stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["verdict"].as_str(),
+        Some("pass"),
+        "verdict should be pass when all pre-existing issues are baselined"
+    );
+    assert_eq!(
+        json["summary"]["dead_code_issues"].as_u64(),
+        Some(0),
+        "baseline should filter all pre-existing unused exports"
+    );
+}
+
+#[test]
+fn audit_rejects_global_baseline_flag() {
+    let tmp = create_audit_baseline_fixture();
+    let output = run_fallow_raw(&[
+        "--baseline",
+        "anything.json",
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 2,
+        "global --baseline on audit should exit 2. stderr: {}",
+        output.stderr
+    );
+    let combined = format!("{}{}", output.stdout, output.stderr);
+    assert!(
+        combined.contains("--dead-code-baseline")
+            || combined.contains("--health-baseline")
+            || combined.contains("--dupes-baseline"),
+        "error should point users at per-analysis flags, got: {combined}"
+    );
+}
+
+#[test]
+fn audit_rejects_global_save_baseline_flag() {
+    let tmp = create_audit_baseline_fixture();
+    let output = run_fallow_raw(&[
+        "--save-baseline",
+        "anywhere.json",
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 2,
+        "global --save-baseline on audit should exit 2. stderr: {}",
+        output.stderr
+    );
+    let combined = format!("{}{}", output.stdout, output.stderr);
+    assert!(
+        combined.contains("--dead-code-baseline")
+            || combined.contains("--health-baseline")
+            || combined.contains("--dupes-baseline"),
+        "error should point users at per-analysis flags, got: {combined}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Audit error handling
+// ---------------------------------------------------------------------------
+
+#[test]
+fn audit_badge_format_exits_2() {
+    let dir = create_audit_fixture("badge");
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "badge",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 2,
+        "audit with --format badge should exit 2 (unsupported)"
+    );
+}
+
+/// `--max-crap` on audit must flow into the health sub-analysis so that a
+/// changed file with a high-complexity untested function triggers the
+/// failing verdict.
+#[test]
+fn audit_max_crap_flag_fails_when_threshold_crossed() {
+    let dir = create_audit_fixture("crap");
+
+    // Introduce a file with a branchy, untested function. Combined with the
+    // low `--max-crap 1`, any non-trivial cyclomatic count is guaranteed to
+    // exceed the threshold.
+    write_branchy_change(dir.path());
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "1",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 1,
+        "audit should fail when --max-crap is crossed. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["verdict"].as_str(),
+        Some("fail"),
+        "verdict should be fail when CRAP threshold is crossed"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #301: ambient git repo-state env vars must not break audit
+// ---------------------------------------------------------------------------
+
+fn audit_with_env(root: &Path, env: &[(&str, &str)]) -> common::CommandOutput {
+    let bin = fallow_bin();
+    let mut cmd = Command::new(&bin);
+    cmd.args([
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ])
+    .env("RUST_LOG", "")
+    .env("NO_COLOR", "1");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let output = cmd.output().expect("failed to run fallow binary");
+    common::CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
+/// Regression test for issue #301. When git invokes hooks (`pre-commit`,
+/// `pre-push`), it sets `GIT_INDEX_FILE=.git/index` (relative path) plus
+/// related repo-state vars. Before the fix in #301, fallow inherited these
+/// into its own git invocations and `git worktree add` failed because the
+/// relative index path no longer resolved from the temporary worktree dir.
+///
+/// The test runs `fallow audit` under each of the ambient repo-state vars
+/// individually and asserts the audit succeeds, mirroring the leak shapes a
+/// hook subprocess actually sees.
+#[test]
+fn audit_succeeds_when_ambient_git_env_vars_leak_from_a_hook() {
+    let dir = create_audit_fixture("hook_env_leak");
+    let root = dir.path();
+
+    // `GIT_INDEX_FILE=.git/index` is the exact leak shape `git commit`
+    // produces; absolute form must also remain a no-op since fallow strips it.
+    let abs_index = root.join(".git/index").to_string_lossy().to_string();
+    let cases: &[(&str, &str)] = &[
+        ("GIT_INDEX_FILE", ".git/index"),
+        ("GIT_INDEX_FILE", abs_index.as_str()),
+        ("GIT_DIR", ".git"),
+        ("GIT_WORK_TREE", "."),
+        ("GIT_OBJECT_DIRECTORY", ".git/objects"),
+        ("GIT_COMMON_DIR", ".git"),
+        ("GIT_PREFIX", ""),
+    ];
+
+    for (key, value) in cases {
+        let output = audit_with_env(root, &[(key, value)]);
+        assert_eq!(
+            output.code, 0,
+            "audit must exit 0 with {key}={value:?} set; stderr: {}",
+            output.stderr
+        );
+        let json = parse_json(&output);
+        assert!(
+            json["verdict"].is_string(),
+            "audit JSON should still include a verdict with {key}={value:?} set"
+        );
+    }
+}
+
+#[test]
+fn audit_coverage_and_coverage_root_feed_crap_scoring() {
+    let dir = create_audit_fixture("coverage-root");
+    write_branchy_change(dir.path());
+
+    let without_coverage = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "10",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        without_coverage.code, 1,
+        "static CRAP estimate should fail before Istanbul coverage is supplied. stderr: {}",
+        without_coverage.stderr
+    );
+
+    let coverage_path = dir.path().join("artifacts/coverage-final.json");
+    write_branchy_istanbul_coverage(&coverage_path, "/ci/workspace/src/index.ts");
+
+    let with_coverage = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "10",
+        "--coverage",
+        coverage_path.to_str().unwrap(),
+        "--coverage-root",
+        "/ci/workspace",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        with_coverage.code, 0,
+        "Istanbul coverage should lower CRAP below the audit threshold. stderr: {}",
+        with_coverage.stderr
+    );
+    let json = parse_json(&with_coverage);
+    assert_eq!(json["verdict"].as_str(), Some("pass"));
+}
+
+#[test]
+fn audit_rejects_relative_coverage_root() {
+    let dir = create_audit_fixture("coverage-root-relative-rejected");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--coverage-root",
+        "src",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 2,
+        "relative --coverage-root should be rejected before audit runs. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["error"], serde_json::json!(true));
+    let message = json["message"].as_str().expect("message should be present");
+    assert!(
+        message.contains("--coverage-root expects an absolute path")
+            && message.contains("got 'src'"),
+        "unexpected error message: {message}"
+    );
+}
+
+#[test]
+fn audit_coverage_relative_path_resolves_against_root_through_base_snapshot() {
+    // Regression: audit.rs::compute_base_snapshot recursively invokes the
+    // health analysis with --root rebound to a temporary base worktree. A
+    // relative --coverage path that worked on the HEAD pass must NOT be
+    // re-resolved against the worktree on the base pass; the coverage file
+    // only exists inside the user's project root. This test exercises the
+    // full audit pipeline (HEAD pass + base-worktree recursion) with a
+    // relative coverage path while the working directory is OUTSIDE the
+    // project, so the resolution against process cwd would silently fail.
+    let dir = create_audit_fixture("coverage-relative");
+    write_branchy_change(dir.path());
+
+    let coverage_path = dir.path().join("artifacts/coverage-final.json");
+    let branchy_source = dir.path().join("src/index.ts");
+    write_branchy_istanbul_coverage(&coverage_path, &branchy_source.to_string_lossy());
+
+    // Pass --coverage as a relative path; --root is the project. Resolution
+    // must happen against --root, not against the binary's process cwd.
+    let with_relative = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "10",
+        "--coverage",
+        "artifacts/coverage-final.json",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        with_relative.code, 0,
+        "relative --coverage must resolve against --root through both the HEAD pass and the base-snapshot recursion. stderr: {}",
+        with_relative.stderr
+    );
+    let json = parse_json(&with_relative);
+    assert_eq!(json["verdict"].as_str(), Some("pass"));
+}
+
+#[test]
+fn audit_coverage_env_fallback_feeds_crap_scoring() {
+    let dir = create_audit_fixture("coverage-env");
+    write_branchy_change(dir.path());
+
+    let coverage_path = dir.path().join("artifacts/env-coverage.json");
+    let branchy_source = dir.path().join("src/index.ts");
+    write_branchy_istanbul_coverage(&coverage_path, &branchy_source.to_string_lossy());
+
+    let without_env = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "10",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        without_env.code, 1,
+        "static CRAP estimate should fail before FALLOW_COVERAGE is supplied. stderr: {}",
+        without_env.stderr
+    );
+
+    let output = run_fallow_raw_with_env(
+        &[
+            "audit",
+            "--root",
+            dir.path().to_str().unwrap(),
+            "--base",
+            "HEAD~1",
+            "--max-crap",
+            "10",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[("FALLOW_COVERAGE", coverage_path.as_path())],
+    );
+    assert_eq!(
+        output.code, 0,
+        "FALLOW_COVERAGE should feed audit's health sub-analysis. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("pass"));
+}

@@ -1,0 +1,6 @@
+{
+  "name": "issue-386-playwright-fixture-teardown",
+  "devDependencies": {
+    "@playwright/test": "^1.0.0"
+  }
+}

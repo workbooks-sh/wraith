@@ -1,0 +1,3 @@
+deploy:
+  script:
+    - tsc scripts/gitlab-deploy.ts && node scripts/gitlab-deploy.js prod

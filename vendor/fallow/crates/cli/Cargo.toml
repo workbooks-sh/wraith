@@ -1,0 +1,118 @@
+[package]
+name = "fallow-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "CLI for fallow, Rust-native codebase intelligence for TypeScript and JavaScript"
+readme = "../../README.md"
+
+[[bin]]
+name = "fallow"
+path = "src/main.rs"
+
+[[bin]]
+name = "stub_sidecar"
+path = "src/bin/stub_sidecar.rs"
+required-features = ["test-sidecar-key"]
+
+[[bin]]
+name = "fallow-schema-emit"
+path = "src/bin/schema_emit.rs"
+required-features = ["schema-emit"]
+
+[features]
+default = []
+# Test-only feature that swaps the sidecar binary-signing verify key and the
+# license JWT verify key for deterministic keypairs derived from fixed seeds.
+# Used by the end-to-end runtime-coverage integration tests. MUST NOT be
+# enabled in release builds; a compile_error! at
+# crates/cli/src/health/coverage.rs guards against that.
+test-sidecar-key = []
+# Library feature that toggles `JsonSchema` derives on the health output types
+# defined in `crates/cli/src/health_types/`. Mirrors the `schema` feature on
+# `fallow-types` and `fallow-core` so the schema-emit binary can derive a
+# single `JsonSchema` document covering health alongside the rest of the
+# output contract. Strictly additive: non-schema builds pay zero compile cost
+# because every derive is gated behind `#[cfg_attr(feature = "schema", ...)]`.
+schema = ["dep:schemars"]
+# Build-only feature that enables the `fallow-schema-emit` binary, which
+# regenerates `docs/output-schema.json` from the Rust source of truth. Pulls in
+# schemars across the workspace via the per-crate `schema` features. Not part
+# of the published CLI; used by the schema drift gate and contributors editing
+# result types.
+schema-emit = [
+    "schema",
+    "fallow-types/schema",
+    "fallow-core/schema",
+]
+
+[dependencies]
+fallow-core = { workspace = true }
+fallow-config = { workspace = true }
+fallow-types = { workspace = true }
+fallow-v8-coverage = { version = "2.77.0", path = "../v8-coverage" }
+fallow-cov-protocol = "0.5"
+fallow-license = { version = "2.77.0", path = "../license" }
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+clap = { workspace = true }
+dunce = { workspace = true }
+globset = { workspace = true }
+colored = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+bitcode = { workspace = true }
+jsonc-parser = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+notify = { workspace = true }
+rayon = { workspace = true }
+notify-debouncer-mini = { workspace = true }
+tempfile = { workspace = true }
+miette = { workspace = true, features = ["fancy"] }
+rustc-hash = { workspace = true }
+oxc_coverage_instrument = { workspace = true }
+srcmap-sourcemap = "0.3.6"
+ureq = { workspace = true }
+url = "2"
+http = "1"
+xxhash-rust = { workspace = true }
+similar = { version = "3", default-features = false, features = ["text"] }
+
+# Schema-emit support: pulled in only when the `schema-emit` feature is active
+# (via the dedicated bin target above). Keeps schemars out of the default
+# release binary.
+schemars = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+signal-hook = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
+
+[lib]
+name = "fallow_cli"
+path = "src/lib.rs"
+doctest = false
+
+[dev-dependencies]
+toml = { workspace = true }
+insta = { workspace = true }
+fallow-types = { workspace = true }
+oxc_span = { workspace = true }
+proptest = { workspace = true }
+base64 = "0.22"
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+fallow-cov-protocol = "0.5"
+serde_yaml_ng = { workspace = true }
+
+[package.metadata.cargo-shear]
+ignored = ["miette"] # feature-only dep: activates fancy rendering for fallow-config's miette::Report
+
+[lints]
+workspace = true

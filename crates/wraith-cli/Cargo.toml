@@ -1,0 +1,23 @@
+[package]
+name = "wraith-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "wraith"
+path = "src/main.rs"
+
+[dependencies]
+wraith-core = { path = "../wraith-core" }
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+notify.workspace = true
+toml.workspace = true
+cargo_metadata.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

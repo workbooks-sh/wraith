@@ -1,0 +1,5 @@
+{
+  "name": "html-workspace-root-relative",
+  "private": true,
+  "workspaces": ["site"]
+}

@@ -1,0 +1,28 @@
+[package]
+name = "fallow-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Node.js bindings for fallow dead-code, duplication, and health analyses"
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+fallow-cli = { workspace = true }
+napi = { version = "3", features = ["serde-json", "tokio_rt"] }
+napi-derive = "3"
+serde_json = { workspace = true }
+
+[build-dependencies]
+napi-build = "2"

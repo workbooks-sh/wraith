@@ -1,0 +1,18 @@
+{
+  "total_issues": 1,
+  "unused_files": [],
+  "unused_exports": [],
+  "unused_types": [],
+  "unused_dependencies": [],
+  "unresolved_imports": [],
+  "circular_dependencies": [
+    {
+      "files": [
+        "src/module-a.ts",
+        "src/module-b.ts",
+        "src/module-c.ts"
+      ],
+      "length": 3
+    }
+  ]
+}

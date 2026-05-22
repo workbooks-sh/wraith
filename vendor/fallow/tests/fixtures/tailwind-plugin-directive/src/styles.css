@@ -1,0 +1,5 @@
+@plugin "@tailwindcss/typography";
+@plugin "daisyui" {
+  themes: light --default;
+}
+@plugin "./tailwind-local-plugin.js";

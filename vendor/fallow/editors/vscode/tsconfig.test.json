@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./.test-dist",
+    "types": ["node", "mocha"],
+    "noEmit": false
+  },
+  "include": [
+    "test/**/*.ts",
+    "vitest.config.mts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".test-dist"
+  ]
+}

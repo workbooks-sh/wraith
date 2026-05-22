@@ -1,0 +1,11 @@
+{
+  "name": "external-style-package-deps",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@acme/style-lib": "1.0.0",
+    "@vuepic/vue-datepicker": "12.1.0",
+    "bootstrap": "5.3.8",
+    "unused-package": "1.0.0"
+  }
+}

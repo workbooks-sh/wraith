@@ -1,0 +1,8 @@
+{
+  "name": "coverage-gaps",
+  "type": "module",
+  "dependencies": {
+    "vitest": "^3.2.4"
+  },
+  "main": "src/main.ts"
+}

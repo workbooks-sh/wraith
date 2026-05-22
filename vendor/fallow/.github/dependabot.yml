@@ -1,0 +1,49 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      oxc:
+        patterns: ["oxc_*"]
+      crypto-rng:
+        patterns: ["ed25519-dalek", "rand", "rand_core"]
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /editors/vscode
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    ignore:
+      # Pinned so engines.vscode floor stays low and Cursor/Windsurf forks can install.
+      # Bump deliberately when raising the engine floor.
+      - dependency-name: "@types/vscode"
+
+  - package-ecosystem: npm
+    directory: /npm/fallow
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

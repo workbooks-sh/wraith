@@ -1,0 +1,128 @@
+name: Allocation Tracking
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'alloc-baseline.json'
+      - '.github/workflows/allocs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'alloc-baseline.json'
+      - '.github/workflows/allocs.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: allocs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  allocations:
+    name: Allocation regression check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: allocs
+
+      - name: Run allocation benchmark
+        run: cargo bench --bench allocations 2>&1 | tee alloc-output.txt
+
+      - name: Parse and check allocations
+        id: parse
+        run: |
+          total_bytes=$(grep '^alloc_total_bytes:' alloc-output.txt | awk '{print $2}')
+          total_blocks=$(grep '^alloc_total_blocks:' alloc-output.txt | awk '{print $2}')
+          max_bytes=$(grep '^alloc_max_bytes:' alloc-output.txt | awk '{print $2}')
+          max_blocks=$(grep '^alloc_max_blocks:' alloc-output.txt | awk '{print $2}')
+
+          {
+            echo "## Allocation Stats"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Total bytes allocated | $total_bytes |"
+            echo "| Total allocations | $total_blocks |"
+            echo "| Peak memory (bytes) | $max_bytes |"
+            echo "| Peak allocations | $max_blocks |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Write custom JSON for benchmark-action tracking
+          python3 -c "
+          import json
+          data = [
+            {'name': 'Total Bytes Allocated', 'unit': 'bytes', 'value': int('${total_bytes:-0}')},
+            {'name': 'Total Allocations', 'unit': 'allocations', 'value': int('${total_blocks:-0}')},
+            {'name': 'Peak Memory', 'unit': 'bytes', 'value': int('${max_bytes:-0}')},
+            {'name': 'Peak Allocations', 'unit': 'allocations', 'value': int('${max_blocks:-0}')}
+          ]
+          print(json.dumps(data, indent=2))
+          " > alloc-bench.json
+
+          if [ ! -f alloc-baseline.json ]; then
+            {
+              echo ""
+              echo "> No baseline found. Run \`scripts/alloc-check.sh --save\` to create one."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::No alloc-baseline.json found — skipping regression check"
+            exit 0
+          fi
+
+          base_total_bytes=$(python3 -c "import json; print(json.load(open('alloc-baseline.json'))['alloc_total_bytes'])")
+          base_max_bytes=$(python3 -c "import json; print(json.load(open('alloc-baseline.json'))['alloc_max_bytes'])")
+
+          failed=0
+
+          check_metric() {
+            local name="$1" current="$2" baseline="$3"
+            if [ -z "$current" ] || [ -z "$baseline" ]; then
+              echo "::warning::Could not parse $name — skipping regression check"
+              return
+            fi
+            if [ "$baseline" -eq 0 ]; then return; fi
+            pct=$(python3 -c "print(round(($current - $baseline) / $baseline * 100, 1))")
+            echo "::notice::$name: $current (baseline: $baseline, ${pct}%)"
+            if python3 -c "exit(0 if ($current - $baseline) / $baseline * 100 > 10 else 1)"; then
+              echo "::warning::$name increased by ${pct}% (threshold: 10%)"
+              failed=1
+            fi
+          }
+
+          check_metric "total_bytes" "$total_bytes" "$base_total_bytes"
+          check_metric "max_bytes" "$max_bytes" "$base_max_bytes"
+
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::Allocation regression detected. Run 'scripts/alloc-check.sh --save' to update baseline."
+            exit 1
+          fi
+
+      - name: Store allocation metrics
+        if: always() && steps.parse.outcome != 'skipped'
+        uses: ./.github/actions/store-benchmark
+        with:
+          name: Fallow Allocations
+          tool: customSmallerIsBetter
+          output-file-path: alloc-bench.json
+          data-dir: allocs
+          alert-threshold: '120%'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          continue-on-error: ${{ github.event_name == 'pull_request' }}

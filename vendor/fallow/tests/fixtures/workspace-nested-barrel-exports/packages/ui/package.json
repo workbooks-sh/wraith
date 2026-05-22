@@ -1,0 +1,7 @@
+{
+  "name": "@issue/ui",
+  "private": true,
+  "exports": {
+    "./foo": "./src/foo/index.ts"
+  }
+}

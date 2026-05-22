@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "baseUrl": ".",
+    "paths": {
+      "@repro/my-lib": ["packages/my-lib/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts"]
+}

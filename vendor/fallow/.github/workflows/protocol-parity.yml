@@ -1,0 +1,159 @@
+name: Protocol parity
+
+# Asserts the `fallow-cov-protocol` version this fallow CLI is pinned to matches
+# the protocol version the latest published `@fallow-cli/fallow-cov` sidecar was
+# built against. If fallow main bumps the protocol minor without a matching
+# sidecar release, every user running `fallow health --runtime-coverage`
+# after the next fallow release would hit a wire-contract break.
+#
+# The runtime handshake at crates/cli/src/health/coverage.rs only checks
+# protocol major, so minor drift escapes. This workflow closes that gap.
+#
+# Protocol is pre-1.0 (0.x.y), so the semver policy is: major bumps are
+# breaking (mismatched majors must fail), minor bumps add optional fields and
+# the sidecar MUST be re-released with a matching minor before a fallow CLI
+# release can emit them safely.
+#
+# Scaffold mode: if the published sidecar's package.json does not yet carry
+# the `fallowProtocol` field, the check logs a warning and passes. Once the
+# fallow-cloud release workflow starts injecting the field, this workflow
+# begins enforcing parity automatically.
+#
+# This workflow reads only pinned, trusted sources (Cargo.lock in this repo
+# and the public npm registry JSON for @fallow-cli/fallow-cov) and does not
+# interpolate any github.event.* input into shell commands.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/cli/Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/protocol-parity.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/cli/Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/protocol-parity.yml"
+  # Daily 07:15 UTC: catches drift from the OTHER side (a sidecar release
+  # ships with a lower protocol minor than fallow main currently emits).
+  schedule:
+    - cron: "15 7 * * *"
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  parity:
+    name: CLI protocol pin matches latest published sidecar
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Assert protocol parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import re
+          import sys
+          import urllib.request
+          from pathlib import Path
+
+          NPM_URL = "https://registry.npmjs.org/@fallow-cli%2Ffallow-cov"
+
+          def read_cli_protocol() -> str:
+              """Resolved fallow-cov-protocol version from the root Cargo.lock."""
+              lock = Path("Cargo.lock").read_text()
+              match = re.search(
+                  r'name = "fallow-cov-protocol"\s*\nversion = "([^"]+)"',
+                  lock,
+              )
+              if not match:
+                  sys.exit(
+                      "ERROR: could not locate fallow-cov-protocol in "
+                      "Cargo.lock. Did the crate get renamed?"
+                  )
+              return match.group(1)
+
+          def fetch_latest_sidecar() -> tuple[str, str | None]:
+              """Return (latest_version, fallow_protocol_or_none) from npm."""
+              with urllib.request.urlopen(NPM_URL, timeout=30) as resp:
+                  doc = json.load(resp)
+              latest = doc.get("dist-tags", {}).get("latest")
+              if not latest:
+                  sys.exit("ERROR: npm metadata has no dist-tags.latest")
+              manifest = doc.get("versions", {}).get(latest, {})
+              protocol = manifest.get("fallowProtocol")
+              return latest, protocol
+
+          def minor_tuple(version: str) -> tuple[int, int]:
+              parts = version.split(".")
+              if len(parts) < 2:
+                  sys.exit(f"ERROR: malformed version {version!r}")
+              try:
+                  return int(parts[0]), int(parts[1])
+              except ValueError:
+                  sys.exit(f"ERROR: non-integer major.minor in {version!r}")
+
+          cli_protocol = read_cli_protocol()
+          sidecar_version, sidecar_protocol = fetch_latest_sidecar()
+
+          print(f"fallow CLI pins fallow-cov-protocol = {cli_protocol}")
+          print(f"latest @fallow-cli/fallow-cov       = {sidecar_version}")
+          protocol_label = sidecar_protocol if sidecar_protocol else "<missing>"
+          print(f"  fallowProtocol field              = {protocol_label}")
+
+          if sidecar_protocol is None:
+              print(
+                  "WARNING: published sidecar does not advertise a "
+                  "`fallowProtocol` field yet. Scaffold-mode pass; "
+                  "enforcement activates once fallow-cloud's release "
+                  "workflow injects the field into the published "
+                  "package.json."
+              )
+              sys.exit(0)
+
+          cli_mm = minor_tuple(cli_protocol)
+          sc_mm = minor_tuple(sidecar_protocol)
+
+          if cli_mm[0] != sc_mm[0]:
+              sys.exit(
+                  f"PROTOCOL MAJOR DRIFT: fallow CLI pins "
+                  f"{cli_protocol} but the latest published sidecar "
+                  f"({sidecar_version}) ships {sidecar_protocol}. "
+                  f"Major bumps are breaking; either revert the fallow pin "
+                  f"or publish a sidecar built against "
+                  f"{cli_mm[0]}.x first."
+              )
+
+          if sc_mm[1] < cli_mm[1]:
+              sys.exit(
+                  f"PROTOCOL MINOR DRIFT: fallow CLI pins "
+                  f"{cli_protocol} but the latest published sidecar "
+                  f"({sidecar_version}) ships {sidecar_protocol}. "
+                  f"Users upgrading only fallow would emit 0.{cli_mm[1]} "
+                  f"requests that a 0.{sc_mm[1]} sidecar may reject. "
+                  f"Publish a sidecar against {cli_mm[0]}.{cli_mm[1]} "
+                  f"before cutting the next fallow release."
+              )
+
+          if sc_mm[1] > cli_mm[1]:
+              print(
+                  f"NOTE: sidecar minor ({sidecar_protocol}) is ahead of "
+                  f"fallow CLI ({cli_protocol}). This is safe (sidecars "
+                  f"are forward-compatible on minor), but fallow can "
+                  f"adopt new optional fields by bumping the protocol dep."
+              )
+
+          print(
+              f"OK: fallow CLI ({cli_protocol}) parity with published "
+              f"sidecar ({sidecar_protocol})."
+          )
+          PY

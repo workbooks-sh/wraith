@@ -1,0 +1,6 @@
+{
+  "name": "angular-inject-class-members",
+  "dependencies": {
+    "@angular/core": "^20.0.0"
+  }
+}

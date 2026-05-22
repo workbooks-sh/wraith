@@ -1,0 +1,5 @@
+{
+  "name": "boundary-bulletproof-fixture",
+  "version": "1.0.0",
+  "main": "src/app/page.ts"
+}

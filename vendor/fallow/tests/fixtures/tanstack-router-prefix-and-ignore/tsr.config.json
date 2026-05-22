@@ -1,0 +1,5 @@
+{
+  "routesDirectory": "./src/routes",
+  "routeFilePrefix": "route-",
+  "routeFileIgnorePattern": "^ignored\\."
+}

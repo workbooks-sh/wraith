@@ -1,0 +1,9 @@
+{
+  "name": "@repro/my-lib",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "is-odd": "^3.0.1"
+  }
+}

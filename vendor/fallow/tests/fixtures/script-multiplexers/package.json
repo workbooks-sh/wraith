@@ -1,0 +1,17 @@
+{
+  "name": "script-multiplexers",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "concurrently": "^8.0.0",
+    "npm-run-all": "^4.0.0",
+    "tsx": "^4.0.0"
+  },
+  "scripts": {
+    "dev": "concurrently \"npm:server\" \"npm:worker\"",
+    "server": "tsx src/server.ts",
+    "worker": "tsx src/worker.ts",
+    "build": "run-s clean compile",
+    "clean": "rm -rf dist",
+    "compile": "tsc"
+  }
+}

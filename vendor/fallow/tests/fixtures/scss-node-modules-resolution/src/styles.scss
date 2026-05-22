@@ -1,0 +1,13 @@
+// Pattern 1: bare specifier -> node_modules + SCSS partial (_functions.scss)
+@import 'bootstrap/scss/functions';
+@import 'bootstrap/scss/variables';
+
+// Pattern 2: bare specifier -> node_modules + CSS extension appended
+@import 'animate.css/animate.min';
+
+// Pattern 3: @use variant
+@use 'bootstrap/scss/mixins';
+
+body {
+  background-color: #fff;
+}
