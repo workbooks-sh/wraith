@@ -9,7 +9,6 @@ Run wraith once per workspace, in each workspace's root:
 ```bash
 cd packages/wavelet && wraith report
 cd packages/wraith && wraith report
-cd packages/orchestrator-core && wraith report
 cd vendor/rvst && wraith report
 ```
 
@@ -83,7 +82,6 @@ If your monorepo also has TypeScript/JavaScript:
 
 **"What's the health of every Rust workspace in this monorepo?"**
 ```bash
-for ws in packages/wavelet packages/wraith packages/orchestrator-core vendor/rvst; do
     echo "=== $ws ==="
     wraith --root "$ws" report | head -20
     echo

@@ -682,6 +682,96 @@ fn extract_fn_v2_handles_match_arm_body() {
     assert!(out.contains("handle_some(y)"), "out: {out}");
 }
 
+// wb-5lgj.41 — extract-fn must hoist LOCAL `use` statements from the
+// enclosing fn body when the extracted code depends on them. Repro
+// (wavelet bin): `use wavelet::{compose, ...};` declared inside run_image
+// → extract a match-arm body that calls `compose::composite_over(...)`
+// → extracted top-level fn fails to compile with E0433 because the
+// local `use` doesn't travel with the body.
+#[test]
+fn extract_fn_v2_hoists_local_uses_when_body_depends_on_them() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let file = root.join("fixture.rs");
+    // outer() has a LOCAL `use std::cmp::max;`. Extracting the body
+    // that calls max() must include `use std::cmp::max;` in the
+    // extracted fn body.
+    std::fs::write(
+        &file,
+        "fn outer(a: i32, b: i32) -> i32 {\n    use std::cmp::max;\n    let result = max(a, b);\n    result + 1\n}\n",
+    )
+    .unwrap();
+    let (out, err, code) = run_wraith_no_root(&[
+        "refactor",
+        "extract-fn",
+        &format!("{}:3..4", file.display()),
+        "--name",
+        "biggest_plus_one",
+        "--dry-run",
+    ]);
+    assert_eq!(code, 0, "stderr: {err}");
+    // The extracted fn body must contain the hoisted use.
+    let body_start = out
+        .find("fn biggest_plus_one")
+        .expect(&format!("no extracted fn in: {out}"));
+    let rest = &out[body_start..];
+    let brace_open = rest.find('{').expect("no opening brace");
+    let brace_close_rel = rest[brace_open..].find("\n}").expect("no closing brace");
+    let body_block = &rest[brace_open + 1..brace_open + brace_close_rel];
+    assert!(
+        body_block.contains("use std :: cmp :: max")
+            || body_block.contains("use std::cmp::max"),
+        "extracted body missing hoisted `use std::cmp::max;`:\n{body_block}"
+    );
+}
+
+// wb-5lgj.42 — extracted match-arm body must be 4-space-indented at the
+// top level, regardless of how deep the original arm body was. Pre-fix,
+// extracting from a 12-space-indented match arm preserved the 12-space
+// indent on line 2+ (line 1 was column-stripped by the syn span slicer,
+// so min_indent computed 0 → no dedent happened).
+#[test]
+fn extract_fn_v2_match_arm_body_dedents_to_top_level_indent() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let file = root.join("fixture.rs");
+    // Match arm body nested 12 spaces deep (fn body 4 + match 4 + arm 4).
+    // Multi-statement so line 1 vs line 2+ differ in column-strip behavior.
+    std::fs::write(
+        &file,
+        "enum E { Some(i32), None }\nfn outer(o: E) {\n    match o {\n        E::Some(y) => {\n            let z = y + 1;\n            let w = z * 2;\n            println!(\"{w}\");\n        }\n        E::None => {}\n    }\n}\n",
+    )
+    .unwrap();
+    let (out, err, code) = run_wraith_no_root(&[
+        "refactor",
+        "extract-fn",
+        &format!("{}:4..8", file.display()),
+        "--name",
+        "handle_some",
+        "--dry-run",
+    ]);
+    assert_eq!(code, 0, "stderr: {err}");
+
+    // Find the extracted fn block + scan its body lines. Every non-blank
+    // body line must start with EXACTLY 4 leading spaces — not 12, not 16.
+    let body_start = out.find("fn handle_some").expect(&format!("no extracted fn in: {out}"));
+    let rest = &out[body_start..];
+    let brace_open = rest.find('{').expect("no opening brace");
+    let brace_close_rel = rest[brace_open..].find("\n}").expect("no closing brace line");
+    let body_block = &rest[brace_open + 1..brace_open + brace_close_rel];
+
+    for line in body_block.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let leading = line.chars().take_while(|c| *c == ' ').count();
+        assert_eq!(
+            leading, 4,
+            "body line should be 4-space indented, got {leading}: {line:?}\nfull body:\n{body_block}"
+        );
+    }
+}
+
 // wb-5lgj.40 — match-arm-body extraction regression. Verifies:
 //   - struct-variant binding types resolve from the local enum decl
 //     (NOT silently defaulted to i32)
@@ -2636,6 +2726,149 @@ pub fn caller() -> i32 { helper(1) }
         "cargo check failed:\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&cargo_out.stdout),
         String::from_utf8_lossy(&cargo_out.stderr),
+    );
+}
+
+// wb-5lgj.45 — move-fn must inject `use crate::...` into EVERY caller
+// file in the same lib crate, not just the first one wraith looks at.
+// Repro hit on wavelet image_arg_to_url move (27 callers across multiple
+// files; only one got the use line). Also verifies the prefix is
+// `crate::` for lib-internal callers, not `<crate-name>::`.
+#[test]
+fn move_fn_injects_use_into_every_same_crate_caller() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_root_workspace(root, &["mycrate"]);
+
+    // lib.rs defines helper + registers two sibling modules. foo.rs and
+    // bar.rs each call helper unqualified (they relied on lib's old
+    // location). After move, both must have `use crate::utils::helpers::helper;`.
+    write_basic_lib_crate(
+        root,
+        "mycrate",
+        r#"
+pub mod foo;
+pub mod bar;
+
+pub fn helper(x: i32) -> i32 { x + 1 }
+"#,
+        "",
+    );
+    write(
+        root,
+        "mycrate/src/foo.rs",
+        "pub fn use_helper_a() -> i32 { helper(1) }\n",
+    );
+    write(
+        root,
+        "mycrate/src/bar.rs",
+        "pub fn use_helper_b() -> i32 { helper(2) }\n",
+    );
+
+    let src_file = root.join("mycrate/src/lib.rs");
+    let (out, err, code) = run_wraith(
+        root,
+        &[
+            "refactor",
+            "move-fn",
+            &format!("{}:helper", src_file.display()),
+            "--to",
+            "mycrate::utils::helpers",
+        ],
+    );
+    assert_eq!(code, 0, "expected 0; stdout: {out}; stderr: {err}");
+
+    // Both callers must have the use line, and it must use `crate::`
+    // (NOT `mycrate::`) since they live inside the same lib crate.
+    let foo = std::fs::read_to_string(root.join("mycrate/src/foo.rs")).unwrap();
+    let bar = std::fs::read_to_string(root.join("mycrate/src/bar.rs")).unwrap();
+
+    assert!(
+        foo.contains("use crate::utils::helpers::helper;"),
+        "foo.rs missing use crate::... line:\n{foo}"
+    );
+    assert!(
+        bar.contains("use crate::utils::helpers::helper;"),
+        "bar.rs missing use crate::... line:\n{bar}"
+    );
+    assert!(
+        !foo.contains("use mycrate::"),
+        "foo.rs should use crate::, not mycrate::\n{foo}"
+    );
+    assert!(
+        !bar.contains("use mycrate::"),
+        "bar.rs should use crate::, not mycrate::\n{bar}"
+    );
+
+    // Sanity: cargo check passes on first try.
+    let cargo_out = std::process::Command::new("cargo")
+        .arg("check")
+        .arg("--quiet")
+        .current_dir(root)
+        .output()
+        .expect("cargo check");
+    assert!(
+        cargo_out.status.success(),
+        "cargo check failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&cargo_out.stdout),
+        String::from_utf8_lossy(&cargo_out.stderr),
+    );
+}
+
+// wb-5lgj.44 — moving a bin fn into the lib must refuse (with a
+// concrete deps list) when the moved fn body calls sibling private
+// fns defined in the same bin. Bin items can't be imported from lib;
+// blindly moving would produce unresolved-name errors at compile time.
+// Safe v2: refuse with a list so the caller extracts deps first.
+#[test]
+fn move_fn_refuses_bin_to_lib_with_private_sibling_deps() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_root_workspace(root, &["mycrate"]);
+
+    // Bin crate that has a moveable fn AND a sibling private helper.
+    write(root, "mycrate/Cargo.toml", &format!(
+        "[package]\nname = \"mycrate\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n\n[[bin]]\nname = \"mybin\"\npath = \"src/bin/mybin.rs\"\n"
+    ));
+    write(root, "mycrate/src/lib.rs", "pub fn lib_marker() {}\n");
+    write(
+        root,
+        "mycrate/src/bin/mybin.rs",
+        // handle_thing calls parse_region (private sibling) and
+        // emit_analysis (also private). Both should appear in the
+        // refusal message.
+        "fn parse_region(s: &str) -> usize { s.len() }\n\
+         fn emit_analysis(n: usize) -> String { format!(\"n={n}\") }\n\
+         pub fn handle_thing(s: &str) -> String {\n\
+             let r = parse_region(s);\n\
+             emit_analysis(r)\n\
+         }\n\
+         fn main() { println!(\"{}\", handle_thing(\"x\")); }\n",
+    );
+
+    let src_file = root.join("mycrate/src/bin/mybin.rs");
+    let (out, err, code) = run_wraith(
+        root,
+        &[
+            "refactor",
+            "move-fn",
+            &format!("{}:handle_thing", src_file.display()),
+            "--to",
+            "mycrate::handlers",
+        ],
+    );
+
+    assert_ne!(code, 0, "expected refusal, got success; stdout: {out}");
+    // The error must name both bin-private deps so the caller knows
+    // exactly what to extract.
+    assert!(
+        err.contains("parse_region") && err.contains("emit_analysis"),
+        "stderr should list both deps; got: {err}"
+    );
+    // And the error should mention the bin file + the offending fn.
+    assert!(
+        err.contains("handle_thing"),
+        "stderr should name the fn being moved; got: {err}"
     );
 }
 

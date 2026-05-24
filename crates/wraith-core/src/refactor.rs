@@ -242,12 +242,21 @@ pub fn extract_fn(opts: &ExtractOptions) -> Result<ExtractResult, ExtractError> 
     };
 
     let async_kw = if flow.has_await { "async " } else { "" };
+
+    // wb-5lgj.41: hoist any LOCAL `use` statements (declared inside the
+    // enclosing fn body) that the extracted code depends on. Without
+    // this, code that referenced `compose::composite_over` via an
+    // in-fn `use wavelet::{compose, ...};` fails to resolve at the
+    // top-level extraction destination.
+    let hoisted_uses = collect_hoisted_local_uses(&enclosing.block, &rewritten_body.body);
+
     let new_fn = format!(
-        "{async_}fn {name}({sig}){ret} {{\n{body}{tail}}}\n",
+        "{async_}fn {name}({sig}){ret} {{\n{uses}{body}{tail}}}\n",
         async_ = async_kw,
         name = opts.new_fn_name,
         sig = sig_params.join(", "),
         ret = ret_type,
+        uses = hoisted_uses,
         body = indent_body(&rewritten_body.body),
         tail = rewritten_body.tail,
     );
@@ -391,11 +400,19 @@ fn extract_match_arm(
         None => String::new(),
     };
 
+    // wb-5lgj.41: hoist local `use` statements from the enclosing fn
+    // body. Same rationale as the block-extract path.
+    let hoisted_uses = match find_enclosing_fn(ast, opts.line_start, opts.line_end) {
+        Some(enclosing) => collect_hoisted_local_uses(&enclosing.block, &body_text),
+        None => String::new(),
+    };
+
     let new_fn = format!(
-        "fn {name}({sig}){ret} {{\n{body}}}\n",
+        "fn {name}({sig}){ret} {{\n{uses}{body}}}\n",
         name = opts.new_fn_name,
         sig = sig_params,
         ret = ret_clause,
+        uses = hoisted_uses,
         body = indent_body(&body_text),
     );
 
@@ -1700,21 +1717,140 @@ fn leading_indent(src: &str, at: LineColumn) -> String {
     s
 }
 
+/// wb-5lgj.41: collect any `use` statements defined locally inside
+/// `enclosing_block` whose imported leaf identifiers appear as tokens
+/// in `body_text`. Returns them as a newline-terminated string suitable
+/// for prepending to the extracted fn body (4-space indented).
+///
+/// Conservative on resolution — we use a token scan rather than real
+/// name resolution. False positives (hoisting an unused use) trip
+/// `unused_imports` warnings, not errors. False negatives would silently
+/// produce E0433 in the extracted fn, so we lean toward inclusion.
+///
+/// Glob imports (`use foo::*;`) are always hoisted when present, since
+/// we can't enumerate their leaf names from the syn tree alone.
+fn collect_hoisted_local_uses(enclosing_block: &syn::Block, body_text: &str) -> String {
+    use syn::{Item, Stmt, UseTree};
+
+    fn leaf_names(tree: &UseTree, out: &mut Vec<String>) -> bool {
+        // Returns `is_glob` — caller hoists unconditionally when true.
+        match tree {
+            UseTree::Path(p) => leaf_names(&p.tree, out),
+            UseTree::Name(n) => {
+                out.push(n.ident.to_string());
+                false
+            }
+            UseTree::Rename(r) => {
+                out.push(r.rename.to_string());
+                false
+            }
+            UseTree::Glob(_) => true,
+            UseTree::Group(g) => {
+                let mut g_glob = false;
+                for sub in &g.items {
+                    if leaf_names(sub, out) {
+                        g_glob = true;
+                    }
+                }
+                g_glob
+            }
+        }
+    }
+
+    fn token_in_body(name: &str, body: &str) -> bool {
+        // Word-boundary check — name must appear as a whole token, not
+        // a substring of a longer identifier.
+        for (i, _) in body.match_indices(name) {
+            let before_ok = i == 0
+                || !body.as_bytes()[i - 1].is_ascii_alphanumeric()
+                    && body.as_bytes()[i - 1] != b'_';
+            let after = i + name.len();
+            let after_ok = after >= body.len()
+                || !body.as_bytes()[after].is_ascii_alphanumeric()
+                    && body.as_bytes()[after] != b'_';
+            if before_ok && after_ok {
+                return true;
+            }
+        }
+        false
+    }
+
+    let mut out = String::new();
+    for stmt in &enclosing_block.stmts {
+        let item_use = match stmt {
+            Stmt::Item(Item::Use(u)) => u,
+            _ => continue,
+        };
+        let mut names = Vec::new();
+        let is_glob = leaf_names(&item_use.tree, &mut names);
+        let any_used = is_glob || names.iter().any(|n| token_in_body(n, body_text));
+        if !any_used {
+            continue;
+        }
+        // Emit the use statement verbatim via syn's pretty-print equivalent.
+        // prettyplease isn't a dep; manual rebuild via quote! would
+        // require adding quote, and the syn::Item already round-trips
+        // via Display? No — syn::Item doesn't impl Display. Construct
+        // a minimal `use ...;` text from the UseTree via tokens.
+        let use_text = use_item_to_text(item_use);
+        out.push_str("    ");
+        out.push_str(&use_text);
+        out.push('\n');
+    }
+    out
+}
+
+/// Render a `syn::ItemUse` back to `use <path>;` text. Uses TokenStream
+/// formatting which keeps the original token shape (paths, brace groups,
+/// renames). Token output is space-separated rather than perfectly
+/// pretty-printed but compiles identically.
+fn use_item_to_text(item_use: &syn::ItemUse) -> String {
+    use quote::ToTokens;
+    let mut ts = proc_macro2::TokenStream::new();
+    item_use.to_tokens(&mut ts);
+    ts.to_string()
+}
+
 fn indent_body(body: &str) -> String {
     let lines: Vec<&str> = body.lines().collect();
-    let min_indent = lines
-        .iter()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| l.chars().take_while(|c| *c == ' ').count())
-        .min()
-        .unwrap_or(0);
+
+    // wb-5lgj.42: when callers feed in body text from a syn span, the
+    // FIRST line is column-stripped (the span starts at the token, not
+    // at column 0) while subsequent lines include their original leading
+    // whitespace. A naive min over all lines sees 0 on line 1 and
+    // refuses to dedent line 2+, preserving (or amplifying) the source's
+    // original deep indent. Skip the first non-empty line from the
+    // min-indent computation iff it has zero leading spaces — then the
+    // dedent reflects the actual indent of the captured statements.
+    let nonblank: Vec<&&str> = lines.iter().filter(|l| !l.trim().is_empty()).collect();
+    let min_indent = if nonblank.len() >= 2
+        && nonblank[0].chars().take_while(|c| *c == ' ').count() == 0
+    {
+        nonblank
+            .iter()
+            .skip(1)
+            .map(|l| l.chars().take_while(|c| *c == ' ').count())
+            .min()
+            .unwrap_or(0)
+    } else {
+        nonblank
+            .iter()
+            .map(|l| l.chars().take_while(|c| *c == ' ').count())
+            .min()
+            .unwrap_or(0)
+    };
     let mut out = String::new();
     for l in &lines {
         if l.trim().is_empty() {
             out.push('\n');
             continue;
         }
-        let stripped: String = l.chars().skip(min_indent).collect();
+        // First line was column-stripped by the span slicer — it has no
+        // leading whitespace to remove. Strip min_indent only from lines
+        // that actually have ≥ min_indent leading spaces.
+        let leading = l.chars().take_while(|c| *c == ' ').count();
+        let strip = std::cmp::min(leading, min_indent);
+        let stripped: String = l.chars().skip(strip).collect();
         out.push_str("    ");
         out.push_str(&stripped);
         out.push('\n');

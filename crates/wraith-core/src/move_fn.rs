@@ -40,6 +40,20 @@ pub enum MoveFnError {
     CrossCrateDenied { src: String, dst: String },
     #[error("destination already defines a `{0}` in module `{1}`")]
     DestCollision(String, String),
+    /// wb-5lgj.44: moving a fn out of a bin into a lib would leave the
+    /// moved fn referencing sibling private fns that are inaccessible
+    /// from the lib (bin items aren't importable). Refuse with the
+    /// list so the caller can extract those sibling fns to the lib
+    /// first, then re-run the move.
+    #[error("cannot move `{fn_name}` from bin `{bin_file}` into lib — it calls bin-private functions that aren't accessible from the lib: {deps:?}. Move (or elevate to pub + relocate) these sibling fns into the lib first, then re-run.")]
+    BinPrivateDeps {
+        /// The fn being moved.
+        fn_name: String,
+        /// Path to the bin file the fn is in.
+        bin_file: PathBuf,
+        /// Names of sibling private fns the moved body calls.
+        deps: Vec<String>,
+    },
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -126,6 +140,23 @@ pub fn move_fn(ws: &Workspace, opts: &MoveFnOptions) -> Result<MoveFnResult, Mov
     // crate) counts as "crosses a target boundary".
     let crosses_target_boundary = src_crate.name != dst_crate.name
         || (src_is_bin && dst_is_lib && src_target_root.as_deref() != Some(&dst_target_root));
+
+    // wb-5lgj.44: when moving from bin → lib, the moved fn cannot call
+    // sibling private fns defined in the same bin file — bin items
+    // aren't reachable from the lib (no `use crate::bin::X` works). Walk
+    // the body, collect free identifier calls, intersect with same-file
+    // private fns. If any survive, refuse with the list so the caller
+    // can extract them to the lib first.
+    if src_is_bin && dst_is_lib {
+        let deps = collect_bin_private_deps(item, &src_ast);
+        if !deps.is_empty() {
+            return Err(MoveFnError::BinPrivateDeps {
+                fn_name: opts.fn_name.clone(),
+                bin_file: opts.src_file.clone(),
+                deps,
+            });
+        }
+    }
 
     let mut edits: Vec<FileEdit> = Vec::new();
     let mut created_files: Vec<PathBuf> = Vec::new();
@@ -584,6 +615,57 @@ fn lib_root_has_deny_missing_docs(lib_root: &Path) -> bool {
     };
     text.lines()
         .any(|l| l.trim().contains("deny(missing_docs)"))
+}
+
+/// wb-5lgj.44: collect free-identifier calls inside `item`'s body that
+/// resolve to a same-file non-pub `fn` in `src_ast`. These are the
+/// sibling private fns that would become unresolved after a bin → lib
+/// move. Result is sorted + deduplicated for stable error messages.
+fn collect_bin_private_deps(item: &syn::ItemFn, src_ast: &syn::File) -> Vec<String> {
+    // 1. Enumerate same-file non-pub fns (the candidate dep universe).
+    let mut private_fn_names: BTreeSet<String> = BTreeSet::new();
+    for f_item in &src_ast.items {
+        if let syn::Item::Fn(other) = f_item {
+            let is_pub = matches!(other.vis, syn::Visibility::Public(_));
+            // The fn being moved doesn't count as its own dep.
+            if !is_pub && other.sig.ident != item.sig.ident {
+                private_fn_names.insert(other.sig.ident.to_string());
+            }
+        }
+    }
+    if private_fn_names.is_empty() {
+        return Vec::new();
+    }
+
+    // 2. Walk the moved fn's body for single-segment Path expressions
+    //    whose identifier matches a private fn name. Token-only scan
+    //    (no real name resolution): conservative — flags any usage of
+    //    `parse_region(...)` if a same-file private `parse_region`
+    //    exists, even if the actual reference happens to resolve to
+    //    something else. False positives are safe (caller adjusts);
+    //    false negatives would be unsafe (silent broken move).
+    struct Scan<'a> {
+        candidates: &'a BTreeSet<String>,
+        hits: BTreeSet<String>,
+    }
+    impl<'a, 'ast> syn::visit::Visit<'ast> for Scan<'a> {
+        fn visit_expr_path(&mut self, p: &'ast syn::ExprPath) {
+            if p.qself.is_none() && p.path.segments.len() == 1 {
+                let name = p.path.segments[0].ident.to_string();
+                if self.candidates.contains(&name) {
+                    self.hits.insert(name);
+                }
+            }
+            syn::visit::visit_expr_path(self, p);
+        }
+    }
+    let mut scan = Scan {
+        candidates: &private_fn_names,
+        hits: BTreeSet::new(),
+    };
+    scan.visit_block(&item.block);
+
+    scan.hits.into_iter().collect()
 }
 
 /// Rewrite `<crate_name>::X` → `crate::X` inside `fn_text`. Token-aware
